@@ -1,26 +1,14 @@
-# ECL Factory Material Planner
+# ECL Material Planner
 
-Professional Streamlit app for ECL-style factory material requirement planning.
+Clean professional Streamlit app for ECL India style factory material planning.
 
-## Upload to GitHub
-
-Files required:
+## Upload files
 
 - app.py
 - requirements.txt
 - runtime.txt
 - README.md
 
-## Deploy on Streamlit Cloud
+## Streamlit main file path
 
-Main file path:
-
-```text
 app.py
-```
-
-## Notes
-
-- SHINE NEW and SHINE OLD include full BOM data from the provided Excel sheet.
-- Other ECL catalogue products are placeholders until internal BOMs are added.
-- Stock is optional. Blank stock is treated as zero.
