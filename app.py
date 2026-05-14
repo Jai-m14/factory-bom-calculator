@@ -1,6 +1,6 @@
-
 import streamlit as st
 import pandas as pd
+import io
 from datetime import datetime
 
 st.set_page_config(
@@ -10,272 +10,324 @@ st.set_page_config(
     initial_sidebar_state="collapsed"
 )
 
-PRODUCTS = {
-    "SHINE NEW": {
-        "description": "New Shine stator wire harness",
-        "items": [
-            ("White Coupler", "White connector / coupler", "pcs", 1),
-            ("Terminal F Lock 6.4", "6.4 mm female lock terminal", "pcs", 2),
-            ("Terminal CB104 Bullet", "CB104 bullet terminal", "pcs", 1),
-            ("Cup Blue CB104", "Blue CB104 cup/cap", "pcs", 1),
-            ("Black Grommet", "Black grommet", "pcs", 1),
-            ("Black PVC Sleeve", "150 mm, size 6 × 7", "pcs", 1),
-            ("Yellow Silicone Sleeve", "5 mm sleeve, 70 mm length", "pcs", 1),
-            ("PVC Wire 2×16/38 Green", "470 mm per harness", "mm", 470),
-            ("PVC Wire Green", "300 mm per harness", "mm", 300),
-            ("Blue Wire with Yellow Line", "300 mm per harness", "mm", 300),
-            ("White Wire", "360 mm per harness", "mm", 360),
-        ],
-    },
-    "SHINE OLD": {
-        "description": "Old Shine stator wire harness",
-        "items": [
-            ("White Coupler", "White connector / coupler", "pcs", 1),
-            ("Terminal F Lock", "F Lock terminal", "pcs", 2),
-            ("Terminal CB104 Bullet", "CB104 bullet terminal", "pcs", 1),
-            ("Black Cap", "Black cap", "pcs", 1),
-            ("Black Grommet", "Black grommet", "pcs", 1),
-            ("Black PVC Sleeve", "150 mm, size 6 × 7", "pcs", 1),
-            ("Yellow Silicone Sleeve", "5 mm sleeve, 70 mm length", "pcs", 1),
-            ("PVC Wire 2×16/38 Green", "330 mm per harness", "mm", 330),
-            ("PVC Wire Green", "550 mm per harness", "mm", 550),
-            ("Blue Wire with Yellow Line", "325 mm per harness", "mm", 325),
-            ("White Wire", "550 mm per harness", "mm", 550),
-        ],
-    },
-}
-
-def qty_text(value, unit):
-    value = float(value or 0)
-    if unit == "pcs":
-        return f"{value:,.0f} pcs"
-    if unit == "mm":
-        return f"{value:,.0f} mm  /  {value / 1000:,.2f} m"
-    return f"{value:,.2f} {unit}"
-
-def build_table(product_name, quantity):
-    rows = []
-    for name, spec, unit, per_piece in PRODUCTS[product_name]["items"]:
-        needed = per_piece * quantity
-        rows.append({
-            "Material": name,
-            "Specification": spec,
-            "Unit": unit,
-            "Needed for 1": per_piece,
-            "Total Needed": needed,
-            "Stock Available": 0.0,
-        })
-    return pd.DataFrame(rows)
-
-def calculate_order(df):
-    result = df.copy()
-    result["Stock Available"] = pd.to_numeric(result["Stock Available"], errors="coerce").fillna(0)
-    result["Total Needed"] = pd.to_numeric(result["Total Needed"], errors="coerce").fillna(0)
-
-    result["Order Quantity"] = (result["Total Needed"] - result["Stock Available"]).clip(lower=0)
-    result["Balance After Making"] = result["Stock Available"] - result["Total Needed"]
-    result["Status"] = result["Order Quantity"].apply(lambda x: "Enough" if x == 0 else "Order")
-    return result
-
-def show_table(result):
-    display = result.copy()
-    for col in ["Needed for 1", "Total Needed", "Stock Available", "Order Quantity", "Balance After Making"]:
-        display[col] = [qty_text(v, u) for v, u in zip(display[col], display["Unit"])]
-    return display[[
-        "Material",
-        "Specification",
-        "Unit",
-        "Needed for 1",
-        "Total Needed",
-        "Stock Available",
-        "Order Quantity",
-        "Balance After Making",
-        "Status",
-    ]]
-
-def csv_file(result, product, quantity):
-    export = result.copy()
-    export.insert(0, "Product", product)
-    export.insert(1, "Production Quantity", quantity)
-    export.insert(2, "Generated At", datetime.now().strftime("%Y-%m-%d %H:%M"))
-    return export.to_csv(index=False).encode("utf-8")
-
+# ── Minimal, safe CSS ──────────────────────────────────────────────────────────
 st.markdown("""
 <style>
-    .block-container {
-        max-width: 1100px;
-        padding-top: 1.5rem;
-    }
+/* Page wrapper */
+.block-container { padding-top: 1.5rem; padding-bottom: 2rem; }
 
-    .main-title {
-        background: white;
-        border: 1px solid #E2E8F0;
-        border-radius: 18px;
-        padding: 24px 28px;
-        margin-bottom: 18px;
-    }
+/* Header card */
+.ecl-header {
+    background: #1F4E8C;
+    color: #ffffff;
+    border-radius: 10px;
+    padding: 1.4rem 1.8rem;
+    margin-bottom: 1.6rem;
+}
+.ecl-header h1 { margin: 0 0 0.3rem 0; font-size: 1.8rem; font-weight: 700; }
+.ecl-header p  { margin: 0; font-size: 1rem; opacity: 0.9; }
 
-    .main-title h1 {
-        margin: 0;
-        color: #172033;
-        font-size: 2.2rem;
-        letter-spacing: -0.03em;
-    }
+/* Step label */
+.step-label {
+    background: #1F4E8C;
+    color: #fff;
+    display: inline-block;
+    border-radius: 20px;
+    padding: 0.2rem 0.85rem;
+    font-size: 0.82rem;
+    font-weight: 600;
+    margin-bottom: 0.5rem;
+}
 
-    .main-title p {
-        margin: 8px 0 0 0;
-        color: #5B677A;
-        font-size: 1.05rem;
-    }
+/* Warning box */
+.warn-box {
+    background: #FFF8E1;
+    border-left: 4px solid #F59E0B;
+    border-radius: 6px;
+    padding: 0.75rem 1rem;
+    font-size: 0.92rem;
+    margin-bottom: 1rem;
+}
 
-    .box {
-        background: white;
-        border: 1px solid #E2E8F0;
-        border-radius: 18px;
-        padding: 20px 22px;
-        margin-bottom: 18px;
-    }
+/* Summary cards */
+.summary-row { display: flex; gap: 1rem; flex-wrap: wrap; margin-bottom: 1.4rem; }
+.sum-card {
+    flex: 1 1 160px;
+    background: #fff;
+    border-radius: 10px;
+    padding: 1rem 1.2rem;
+    border: 1px solid #E2E8F0;
+    box-shadow: 0 1px 4px rgba(0,0,0,0.07);
+    text-align: center;
+}
+.sum-card .sc-num  { font-size: 2rem; font-weight: 700; }
+.sum-card .sc-lbl  { font-size: 0.82rem; color: #64748B; margin-top: 0.2rem; }
+.sum-green .sc-num { color: #16A34A; }
+.sum-orange .sc-num{ color: #EA580C; }
+.sum-blue .sc-num  { color: #1F4E8C; }
 
-    .step {
-        color: #1F4E8C;
-        font-size: 0.85rem;
-        font-weight: 800;
-        letter-spacing: 0.08em;
-        text-transform: uppercase;
-        margin-bottom: 4px;
-    }
+/* Download button */
+.stDownloadButton > button {
+    background: #1F4E8C !important;
+    color: #fff !important;
+    border: none !important;
+    border-radius: 8px !important;
+    padding: 0.55rem 1.4rem !important;
+    font-size: 1rem !important;
+    font-weight: 600 !important;
+    cursor: pointer !important;
+}
+.stDownloadButton > button:hover { background: #17407A !important; }
 
-    .box-title {
-        color: #172033;
-        font-size: 1.35rem;
-        font-weight: 800;
-        margin-bottom: 8px;
-    }
-
-    .help {
-        color: #5B677A;
-        margin-bottom: 14px;
-    }
-
-    .warning {
-        background: #FFF7E6;
-        border: 1px solid #F5C76B;
-        color: #5A3A00;
-        border-radius: 14px;
-        padding: 14px 16px;
-        margin-bottom: 16px;
-        font-size: 1rem;
-    }
-
-    div[data-testid="stMetric"] {
-        background: white;
-        border: 1px solid #E2E8F0;
-        border-radius: 16px;
-        padding: 14px;
-    }
-
-    .stDownloadButton > button {
-        background: #1F4E8C !important;
-        color: white !important;
-        border-radius: 12px !important;
-        border: none !important;
-        font-weight: 700 !important;
-        height: 46px;
-    }
+/* Collapsed future section */
+details summary { cursor: pointer; color: #64748B; font-size: 0.88rem; }
+details p, details ul { font-size: 0.88rem; color: #475569; }
 </style>
 """, unsafe_allow_html=True)
 
+
+# ── Product data ───────────────────────────────────────────────────────────────
+PRODUCTS = {
+    "SHINE NEW": {
+        "description": "New Shine stator wire harness",
+        "materials": [
+            {"Material": "White Coupler",             "Specification": "White connector / coupler",      "Unit": "pcs", "Needed for 1": 1},
+            {"Material": "Terminal F Lock 6.4",       "Specification": "6.4 mm female lock terminal",    "Unit": "pcs", "Needed for 1": 2},
+            {"Material": "Terminal CB104 Bullet",     "Specification": "CB104 bullet terminal",          "Unit": "pcs", "Needed for 1": 1},
+            {"Material": "Cup Blue CB104",            "Specification": "Blue CB104 cup/cap",             "Unit": "pcs", "Needed for 1": 1},
+            {"Material": "Black Grommet",             "Specification": "Black grommet",                  "Unit": "pcs", "Needed for 1": 1},
+            {"Material": "Black PVC Sleeve",          "Specification": "150 mm, size 6 × 7",             "Unit": "pcs", "Needed for 1": 1},
+            {"Material": "Yellow Silicone Sleeve",    "Specification": "5 mm sleeve, 70 mm length",      "Unit": "pcs", "Needed for 1": 1},
+            {"Material": "PVC Wire 2×16/38 Green",    "Specification": "470 mm per harness",             "Unit": "mm",  "Needed for 1": 470},
+            {"Material": "PVC Wire Green",            "Specification": "300 mm per harness",             "Unit": "mm",  "Needed for 1": 300},
+            {"Material": "Blue Wire with Yellow Line","Specification": "300 mm per harness",             "Unit": "mm",  "Needed for 1": 300},
+            {"Material": "White Wire",                "Specification": "360 mm per harness",             "Unit": "mm",  "Needed for 1": 360},
+        ]
+    },
+    "SHINE OLD": {
+        "description": "Old Shine stator wire harness",
+        "materials": [
+            {"Material": "White Coupler",             "Specification": "White connector / coupler",      "Unit": "pcs", "Needed for 1": 1},
+            {"Material": "Terminal F Lock",           "Specification": "F Lock terminal",                "Unit": "pcs", "Needed for 1": 2},
+            {"Material": "Terminal CB104 Bullet",     "Specification": "CB104 bullet terminal",          "Unit": "pcs", "Needed for 1": 1},
+            {"Material": "Black Cap",                 "Specification": "Black cap",                      "Unit": "pcs", "Needed for 1": 1},
+            {"Material": "Black Grommet",             "Specification": "Black grommet",                  "Unit": "pcs", "Needed for 1": 1},
+            {"Material": "Black PVC Sleeve",          "Specification": "150 mm, size 6 × 7",             "Unit": "pcs", "Needed for 1": 1},
+            {"Material": "Yellow Silicone Sleeve",    "Specification": "5 mm sleeve, 70 mm length",      "Unit": "pcs", "Needed for 1": 1},
+            {"Material": "PVC Wire 2×16/38 Green",    "Specification": "330 mm per harness",             "Unit": "mm",  "Needed for 1": 330},
+            {"Material": "PVC Wire Green",            "Specification": "550 mm per harness",             "Unit": "mm",  "Needed for 1": 550},
+            {"Material": "Blue Wire with Yellow Line","Specification": "325 mm per harness",             "Unit": "mm",  "Needed for 1": 325},
+            {"Material": "White Wire",                "Specification": "550 mm per harness",             "Unit": "mm",  "Needed for 1": 550},
+        ]
+    }
+}
+
+FUTURE_PRODUCTS = [
+    "Horns DC", "Horns AC", "Stators", "Source Coils", "Light Coils",
+    "Ignition Coils", "Igniters", "CDI Units", "Regulator Rectifiers",
+    "Starter Relays", "Flashers", "Buzzers"
+]
+
+
+# ── Helper: mm display ─────────────────────────────────────────────────────────
+def mm_display(val_mm):
+    """Return a readable string for wire quantities: '470000 mm / 470 m'"""
+    m = val_mm / 1000
+    if m == int(m):
+        return f"{int(val_mm):,} mm / {int(m):,} m"
+    return f"{int(val_mm):,} mm / {m:.2f} m"
+
+
+# ── Header ─────────────────────────────────────────────────────────────────────
 st.markdown("""
-<div class="main-title">
-    <h1>ECL Material Calculator</h1>
+<div class="ecl-header">
+    <h1>🏭 ECL Material Calculator</h1>
     <p>Enter how many pieces to make. Enter stock if you know it. The app tells you what to order.</p>
 </div>
 """, unsafe_allow_html=True)
 
-st.markdown('<div class="box">', unsafe_allow_html=True)
-st.markdown('<div class="step">Step 1</div>', unsafe_allow_html=True)
-st.markdown('<div class="box-title">Select product and quantity</div>', unsafe_allow_html=True)
+# ── Step 1 ─────────────────────────────────────────────────────────────────────
+st.markdown('<div class="step-label">Step 1 — Select product and quantity</div>', unsafe_allow_html=True)
 
-c1, c2 = st.columns([1.4, 1])
-with c1:
-    product = st.selectbox("Product", list(PRODUCTS.keys()), label_visibility="visible")
-    st.caption(PRODUCTS[product]["description"])
-with c2:
-    quantity = st.number_input("How many pieces to make?", min_value=0, value=1000, step=1)
+col1, col2 = st.columns([1, 1])
+with col1:
+    product_name = st.selectbox("Select product", list(PRODUCTS.keys()), label_visibility="visible")
+with col2:
+    qty = st.number_input("How many pieces to make?", min_value=0, value=1000, step=1)
 
-st.markdown('</div>', unsafe_allow_html=True)
+st.caption(f"📋 {PRODUCTS[product_name]['description']}")
+st.divider()
 
-st.markdown('<div class="box">', unsafe_allow_html=True)
-st.markdown('<div class="step">Step 2</div>', unsafe_allow_html=True)
-st.markdown('<div class="box-title">Enter stock available</div>', unsafe_allow_html=True)
-st.markdown('<div class="help">Only change the stock column. Leave it as 0 if you do not know current stock.</div>', unsafe_allow_html=True)
-st.markdown(
-    '<div class="warning"><b>Important:</b> For parts, enter pieces. For wire, enter millimetres. Example: 500 metres = 500000 mm.</div>',
-    unsafe_allow_html=True
-)
+# ── Step 2 ─────────────────────────────────────────────────────────────────────
+st.markdown('<div class="step-label">Step 2 — Enter stock available (leave blank if you don\'t know)</div>', unsafe_allow_html=True)
 
-base_df = build_table(product, quantity)
+st.markdown("""
+<div class="warn-box">
+⚠️ <strong>Unit reminder:</strong> For parts, enter pieces (pcs). 
+For wire, enter millimetres (mm). Example: 500 metres = 500,000 mm.
+</div>
+""", unsafe_allow_html=True)
+
+materials = PRODUCTS[product_name]["materials"]
+
+# Build editor dataframe
+editor_rows = []
+for m in materials:
+    total = m["Needed for 1"] * qty
+    display_total = mm_display(total) if m["Unit"] == "mm" else f"{total:,} pcs"
+    editor_rows.append({
+        "Material": m["Material"],
+        "Specification": m["Specification"],
+        "Unit": m["Unit"],
+        "Needed for 1": f"{m['Needed for 1']:,} {m['Unit']}",
+        "Total Needed": display_total,
+        "Stock Available": 0,
+    })
+
+editor_df = pd.DataFrame(editor_rows)
 
 edited = st.data_editor(
-    base_df,
-    hide_index=True,
+    editor_df,
     use_container_width=True,
-    num_rows="fixed",
+    hide_index=True,
     disabled=["Material", "Specification", "Unit", "Needed for 1", "Total Needed"],
-    column_order=["Material", "Specification", "Unit", "Needed for 1", "Total Needed", "Stock Available"],
     column_config={
-        "Material": st.column_config.TextColumn("Material", width="medium"),
-        "Specification": st.column_config.TextColumn("Specification", width="large"),
-        "Unit": st.column_config.TextColumn("Unit", width="small"),
-        "Needed for 1": st.column_config.NumberColumn("Needed for 1", width="small"),
-        "Total Needed": st.column_config.NumberColumn("Total Needed", width="medium"),
-        "Stock Available": st.column_config.NumberColumn("Stock Available", min_value=0, step=1, width="medium"),
+        "Stock Available": st.column_config.NumberColumn(
+            "Stock Available",
+            help="Enter how much stock you currently have. Leave as 0 if unknown.",
+            min_value=0,
+            step=1,
+            format="%d",
+        )
     },
-    key=f"stock_table_{product}_{quantity}",
+    key=f"editor_{product_name}"
 )
 
-st.markdown('</div>', unsafe_allow_html=True)
+st.divider()
 
-result = calculate_order(edited)
+# ── Step 3 — Calculate ─────────────────────────────────────────────────────────
+st.markdown('<div class="step-label">Step 3 — Order summary</div>', unsafe_allow_html=True)
 
-need_order = int((result["Order Quantity"] > 0).sum())
-enough = int((result["Order Quantity"] == 0).sum())
-parts_to_order = result[result["Unit"] == "pcs"]["Order Quantity"].sum()
-wire_to_order_mm = result[result["Unit"] == "mm"]["Order Quantity"].sum()
+result_rows = []
+for i, m in enumerate(materials):
+    total_needed = m["Needed for 1"] * qty
+    stock = int(edited.iloc[i]["Stock Available"] or 0)
+    order_qty = max(0, total_needed - stock)
+    balance = stock - total_needed
 
-st.markdown('<div class="box">', unsafe_allow_html=True)
-st.markdown('<div class="step">Step 3</div>', unsafe_allow_html=True)
-st.markdown('<div class="box-title">Final result</div>', unsafe_allow_html=True)
-
-m1, m2, m3, m4 = st.columns(4)
-m1.metric("Enough Stock", enough)
-m2.metric("Need Order", need_order)
-m3.metric("Parts To Order", f"{parts_to_order:,.0f} pcs")
-m4.metric("Wire To Order", f"{wire_to_order_mm / 1000:,.2f} m")
-
-final = show_table(result)
-
-def status_style(row):
-    styles = [""] * len(row)
-    if row["Status"] == "Order":
-        styles[row.index.get_loc("Status")] = "background-color:#FFF1E6;color:#9A3412;font-weight:800;"
-        styles[row.index.get_loc("Order Quantity")] = "color:#9A3412;font-weight:800;"
+    if m["Unit"] == "mm":
+        total_disp   = mm_display(total_needed)
+        order_disp   = mm_display(order_qty) if order_qty > 0 else f"0 mm / 0 m"
+        balance_disp = (f"-{mm_display(-balance)}" if balance < 0
+                        else f"{mm_display(balance)}" if balance > 0
+                        else "0 mm / 0 m")
+        stock_disp   = mm_display(stock) if stock > 0 else "0 mm / 0 m"
     else:
-        styles[row.index.get_loc("Status")] = "background-color:#EAF7EE;color:#166534;font-weight:800;"
-    return styles
+        total_disp   = f"{total_needed:,} pcs"
+        order_disp   = f"{order_qty:,} pcs"
+        balance_disp = f"{balance:,} pcs"
+        stock_disp   = f"{stock:,} pcs"
 
-st.dataframe(final.style.apply(status_style, axis=1), use_container_width=True, hide_index=True)
+    status = "✅ Enough" if order_qty == 0 else "🔴 Order"
+
+    result_rows.append({
+        "Material":            m["Material"],
+        "Specification":       m["Specification"],
+        "Unit":                m["Unit"],
+        "Needed for 1":        f"{m['Needed for 1']:,} {m['Unit']}",
+        "Total Needed":        total_disp,
+        "Stock Available":     stock_disp,
+        "Order Quantity":      order_disp,
+        "Balance After Making":balance_disp,
+        "Status":              status,
+        # raw numerics for summary cards
+        "_order_raw":          order_qty,
+        "_unit":               m["Unit"],
+    })
+
+result_df = pd.DataFrame(result_rows)
+
+# Summary counts
+n_enough      = sum(1 for r in result_rows if r["_order_raw"] == 0)
+n_order       = sum(1 for r in result_rows if r["_order_raw"] > 0)
+n_parts_order = sum(1 for r in result_rows if r["_order_raw"] > 0 and r["_unit"] == "pcs")
+n_wire_order  = sum(1 for r in result_rows if r["_order_raw"] > 0 and r["_unit"] == "mm")
+
+st.markdown(f"""
+<div class="summary-row">
+  <div class="sum-card sum-green">
+    <div class="sc-num">{n_enough}</div>
+    <div class="sc-lbl">Enough Stock</div>
+  </div>
+  <div class="sum-card sum-orange">
+    <div class="sc-num">{n_order}</div>
+    <div class="sc-lbl">Need Order</div>
+  </div>
+  <div class="sum-card sum-blue">
+    <div class="sc-num">{n_parts_order}</div>
+    <div class="sc-lbl">Parts To Order</div>
+  </div>
+  <div class="sum-card sum-blue">
+    <div class="sc-num">{n_wire_order}</div>
+    <div class="sc-lbl">Wire To Order</div>
+  </div>
+</div>
+""", unsafe_allow_html=True)
+
+# Display table (drop internal columns)
+display_df = result_df.drop(columns=["_order_raw", "_unit"])
+
+def colour_status(val):
+    if "Enough" in str(val):
+        return "background-color: #DCFCE7; color: #15803D; font-weight: 600;"
+    elif "Order" in str(val):
+        return "background-color: #FFEDD5; color: #C2410C; font-weight: 600;"
+    return ""
+
+styled = display_df.style.map(colour_status, subset=["Status"])
+st.dataframe(styled, use_container_width=True, hide_index=True)
+
+# ── CSV Export ─────────────────────────────────────────────────────────────────
+csv_rows = []
+for r in result_rows:
+    csv_rows.append({
+        "Product":               product_name,
+        "Production Quantity":   qty,
+        "Generated At":          datetime.now().strftime("%Y-%m-%d %H:%M"),
+        "Material":              r["Material"],
+        "Specification":         r["Specification"],
+        "Unit":                  r["Unit"],
+        "Needed for 1":          r["Needed for 1"],
+        "Total Needed":          r["Total Needed"],
+        "Stock Available":       r["Stock Available"],
+        "Order Quantity":        r["Order Quantity"],
+        "Balance After Making":  r["Balance After Making"],
+        "Status":                r["Status"].replace("✅ ", "").replace("🔴 ", ""),
+    })
+
+csv_df = pd.DataFrame(csv_rows)
+csv_buf = io.StringIO()
+csv_df.to_csv(csv_buf, index=False)
+csv_bytes = csv_buf.getvalue().encode("utf-8")
+
+filename = f"ECL_Order_{product_name.replace(' ', '_')}_{qty}pcs_{datetime.now().strftime('%Y%m%d_%H%M')}.csv"
 
 st.download_button(
-    "Download Order Sheet",
-    data=csv_file(result, product, quantity),
-    file_name=f"{product.replace(' ', '_')}_order_sheet.csv",
+    label="⬇️ Download Order Sheet (CSV)",
+    data=csv_bytes,
+    file_name=filename,
     mime="text/csv",
-    use_container_width=True,
 )
 
-st.markdown('</div>', unsafe_allow_html=True)
-
-with st.expander("For office use: other ECL products to add later"):
-    st.write("Only SHINE NEW and SHINE OLD have full BOM data right now. Add more products when their BOM sheets are available.")
-    st.write("Future product families: Horns DC, Horns AC, Stators, Source Coils, Light Coils, Ignition Coils, Igniters, CDI Units, Regulator Rectifiers, Starter Relays, Flashers and Buzzers.")
+# ── Future products section ────────────────────────────────────────────────────
+st.markdown("<br>", unsafe_allow_html=True)
+future_list = "\n".join(f"<li>{p}</li>" for p in FUTURE_PRODUCTS)
+st.markdown(f"""
+<details>
+<summary>📁 For office use: other ECL products to add later</summary>
+<p>Only <strong>SHINE NEW</strong> and <strong>SHINE OLD</strong> have full material data right now.
+Add more products when their material sheets are available.</p>
+<p><strong>Future product families:</strong></p>
+<ul>{future_list}</ul>
+</details>
+""", unsafe_allow_html=True)
