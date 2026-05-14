@@ -1,566 +1,466 @@
-
 import streamlit as st
 import pandas as pd
+import io
 from datetime import datetime
 
-# =========================================================
-# ECL MATERIAL REQUIREMENT PLANNER
-# Three-page workflow:
-# 1. Required Components
-# 2. Stock Entry
-# 3. Final Business Requirement
-# =========================================================
-
 st.set_page_config(
-    page_title="ECL Material Requirement Planner",
+    page_title="ECL Material Calculator",
     page_icon="🏭",
     layout="wide",
     initial_sidebar_state="expanded"
 )
 
-# -----------------------------
-# PRODUCT DATA
-# -----------------------------
+# ── Minimal, safe CSS based on the approved baseline ──────────────────────────
+st.markdown("""
+<style>
+.block-container { padding-top: 1.4rem; padding-bottom: 2rem; max-width: 1180px; }
 
+.ecl-header {
+    background: #1F4E8C;
+    color: #ffffff;
+    border-radius: 10px;
+    padding: 1.4rem 1.8rem;
+    margin-bottom: 1.3rem;
+}
+.ecl-header h1 { margin: 0 0 0.3rem 0; font-size: 1.85rem; font-weight: 700; color: #ffffff; }
+.ecl-header p  { margin: 0; font-size: 1rem; opacity: 0.92; color: #ffffff; }
+
+.step-label {
+    background: #1F4E8C;
+    color: #fff;
+    display: inline-block;
+    border-radius: 20px;
+    padding: 0.2rem 0.85rem;
+    font-size: 0.82rem;
+    font-weight: 600;
+    margin-bottom: 0.55rem;
+}
+
+.info-card {
+    background: #ffffff;
+    border: 1px solid #E2E8F0;
+    border-radius: 10px;
+    padding: 1rem 1.15rem;
+    margin-bottom: 1rem;
+    box-shadow: 0 1px 4px rgba(0,0,0,0.06);
+}
+
+.warn-box {
+    background: #FFF8E1;
+    border-left: 4px solid #F59E0B;
+    border-radius: 6px;
+    padding: 0.75rem 1rem;
+    font-size: 0.92rem;
+    margin-bottom: 1rem;
+}
+
+.pending-box {
+    background: #FFF8E1;
+    border-left: 4px solid #F59E0B;
+    border-radius: 6px;
+    padding: 1rem 1.1rem;
+    font-size: 0.96rem;
+    margin: 1rem 0;
+}
+
+.summary-row { display: flex; gap: 1rem; flex-wrap: wrap; margin-bottom: 1.4rem; }
+.sum-card {
+    flex: 1 1 160px;
+    background: #fff;
+    border-radius: 10px;
+    padding: 1rem 1.2rem;
+    border: 1px solid #E2E8F0;
+    box-shadow: 0 1px 4px rgba(0,0,0,0.07);
+    text-align: center;
+}
+.sum-card .sc-num  { font-size: 2rem; font-weight: 700; }
+.sum-card .sc-lbl  { font-size: 0.82rem; color: #64748B; margin-top: 0.2rem; }
+.sum-green .sc-num { color: #16A34A; }
+.sum-orange .sc-num{ color: #EA580C; }
+.sum-blue .sc-num  { color: #1F4E8C; }
+
+.stDownloadButton > button {
+    background: #1F4E8C !important;
+    color: #fff !important;
+    border: none !important;
+    border-radius: 8px !important;
+    padding: 0.55rem 1.4rem !important;
+    font-size: 1rem !important;
+    font-weight: 600 !important;
+    cursor: pointer !important;
+}
+.stDownloadButton > button:hover { background: #17407A !important; }
+
+.small-note { color: #64748B; font-size: 0.9rem; margin-top: 0.25rem; }
+</style>
+""", unsafe_allow_html=True)
+
+# ── Product data ───────────────────────────────────────────────────────────────
 PRODUCTS = {
     "SHINE NEW": {
         "category": "Stators / Wire Harness",
         "status": "READY",
-        "description": "Wire Shine Stator harness - new model using Cup Blue CB104.",
-        "components": [
-            {"Material": "White Coupler", "Specification": "White connector / coupler", "Unit": "pcs", "Required Per Unit": 1},
-            {"Material": "Terminal F Lock 6.4", "Specification": "6.4 mm female lock terminal", "Unit": "pcs", "Required Per Unit": 2},
-            {"Material": "Terminal CB104 Bullet", "Specification": "CB104 bullet terminal", "Unit": "pcs", "Required Per Unit": 1},
-            {"Material": "Cup Blue CB104", "Specification": "Blue CB104 cup/cap", "Unit": "pcs", "Required Per Unit": 1},
-            {"Material": "Black Grommet", "Specification": "Black grommet", "Unit": "pcs", "Required Per Unit": 1},
-            {"Material": "Black PVC Sleeve", "Specification": "150 mm, size 6 × 7", "Unit": "pcs", "Required Per Unit": 1},
-            {"Material": "Yellow Silicone Sleeve", "Specification": "5 mm sleeve, 70 mm length", "Unit": "pcs", "Required Per Unit": 1},
-            {"Material": "PVC Wire 2×16/38 Green", "Specification": "470 mm per harness", "Unit": "mm", "Required Per Unit": 470},
-            {"Material": "PVC Wire Green", "Specification": "300 mm per harness", "Unit": "mm", "Required Per Unit": 300},
-            {"Material": "Blue Wire with Yellow Line", "Specification": "300 mm per harness", "Unit": "mm", "Required Per Unit": 300},
-            {"Material": "White Wire", "Specification": "360 mm per harness", "Unit": "mm", "Required Per Unit": 360},
-        ],
+        "description": "New Shine stator wire harness",
+        "materials": [
+            {"Material": "White Coupler",             "Specification": "White connector / coupler",      "Unit": "pcs", "Needed for 1": 1},
+            {"Material": "Terminal F Lock 6.4",       "Specification": "6.4 mm female lock terminal",    "Unit": "pcs", "Needed for 1": 2},
+            {"Material": "Terminal CB104 Bullet",     "Specification": "CB104 bullet terminal",          "Unit": "pcs", "Needed for 1": 1},
+            {"Material": "Cup Blue CB104",            "Specification": "Blue CB104 cup/cap",             "Unit": "pcs", "Needed for 1": 1},
+            {"Material": "Black Grommet",             "Specification": "Black grommet",                  "Unit": "pcs", "Needed for 1": 1},
+            {"Material": "Black PVC Sleeve",          "Specification": "150 mm, size 6 × 7",             "Unit": "pcs", "Needed for 1": 1},
+            {"Material": "Yellow Silicone Sleeve",    "Specification": "5 mm sleeve, 70 mm length",      "Unit": "pcs", "Needed for 1": 1},
+            {"Material": "PVC Wire 2×16/38 Green",    "Specification": "470 mm per harness",             "Unit": "mm",  "Needed for 1": 470},
+            {"Material": "PVC Wire Green",            "Specification": "300 mm per harness",             "Unit": "mm",  "Needed for 1": 300},
+            {"Material": "Blue Wire with Yellow Line","Specification": "300 mm per harness",             "Unit": "mm",  "Needed for 1": 300},
+            {"Material": "White Wire",                "Specification": "360 mm per harness",             "Unit": "mm",  "Needed for 1": 360},
+        ]
     },
     "SHINE OLD": {
         "category": "Stators / Wire Harness",
         "status": "READY",
-        "description": "Wire Shine Stator harness - old model using Black Cap.",
-        "components": [
-            {"Material": "White Coupler", "Specification": "White connector / coupler", "Unit": "pcs", "Required Per Unit": 1},
-            {"Material": "Terminal F Lock", "Specification": "F Lock terminal", "Unit": "pcs", "Required Per Unit": 2},
-            {"Material": "Terminal CB104 Bullet", "Specification": "CB104 bullet terminal", "Unit": "pcs", "Required Per Unit": 1},
-            {"Material": "Black Cap", "Specification": "Black cap", "Unit": "pcs", "Required Per Unit": 1},
-            {"Material": "Black Grommet", "Specification": "Black grommet", "Unit": "pcs", "Required Per Unit": 1},
-            {"Material": "Black PVC Sleeve", "Specification": "150 mm, size 6 × 7", "Unit": "pcs", "Required Per Unit": 1},
-            {"Material": "Yellow Silicone Sleeve", "Specification": "5 mm sleeve, 70 mm length", "Unit": "pcs", "Required Per Unit": 1},
-            {"Material": "PVC Wire 2×16/38 Green", "Specification": "330 mm per harness", "Unit": "mm", "Required Per Unit": 330},
-            {"Material": "PVC Wire Green", "Specification": "550 mm per harness", "Unit": "mm", "Required Per Unit": 550},
-            {"Material": "Blue Wire with Yellow Line", "Specification": "325 mm per harness", "Unit": "mm", "Required Per Unit": 325},
-            {"Material": "White Wire", "Specification": "550 mm per harness", "Unit": "mm", "Required Per Unit": 550},
-        ],
+        "description": "Old Shine stator wire harness",
+        "materials": [
+            {"Material": "White Coupler",             "Specification": "White connector / coupler",      "Unit": "pcs", "Needed for 1": 1},
+            {"Material": "Terminal F Lock",           "Specification": "F Lock terminal",                "Unit": "pcs", "Needed for 1": 2},
+            {"Material": "Terminal CB104 Bullet",     "Specification": "CB104 bullet terminal",          "Unit": "pcs", "Needed for 1": 1},
+            {"Material": "Black Cap",                 "Specification": "Black cap",                      "Unit": "pcs", "Needed for 1": 1},
+            {"Material": "Black Grommet",             "Specification": "Black grommet",                  "Unit": "pcs", "Needed for 1": 1},
+            {"Material": "Black PVC Sleeve",          "Specification": "150 mm, size 6 × 7",             "Unit": "pcs", "Needed for 1": 1},
+            {"Material": "Yellow Silicone Sleeve",    "Specification": "5 mm sleeve, 70 mm length",      "Unit": "pcs", "Needed for 1": 1},
+            {"Material": "PVC Wire 2×16/38 Green",    "Specification": "330 mm per harness",             "Unit": "mm",  "Needed for 1": 330},
+            {"Material": "PVC Wire Green",            "Specification": "550 mm per harness",             "Unit": "mm",  "Needed for 1": 550},
+            {"Material": "Blue Wire with Yellow Line","Specification": "325 mm per harness",             "Unit": "mm",  "Needed for 1": 325},
+            {"Material": "White Wire",                "Specification": "550 mm per harness",             "Unit": "mm",  "Needed for 1": 550},
+        ]
     },
-
-    # Catalogue placeholders until internal component/BOM sheets are provided.
-    "Horns DC - Windtone Black": {"category": "Horns DC", "status": "TO BE UPDATED SOON", "description": "Component list pending.", "components": []},
-    "Horns DC - Windtone": {"category": "Horns DC", "status": "TO BE UPDATED SOON", "description": "Component list pending.", "components": []},
-    "Horns DC - 2W": {"category": "Horns DC", "status": "TO BE UPDATED SOON", "description": "Component list pending.", "components": []},
-    "Horns DC - 2W HD": {"category": "Horns DC", "status": "TO BE UPDATED SOON", "description": "Component list pending.", "components": []},
-    "Horns AC - 2W 6V & 12V Flower Type": {"category": "Horns AC", "status": "TO BE UPDATED SOON", "description": "Component list pending.", "components": []},
-    "Horns AC - 2W 6V & 12V Milano Type": {"category": "Horns AC", "status": "TO BE UPDATED SOON", "description": "Component list pending.", "components": []},
-    "Horns AC - 2W 6V & 12V Super XL": {"category": "Horns AC", "status": "TO BE UPDATED SOON", "description": "Component list pending.", "components": []},
-    "Stators - 2W": {"category": "Stators", "status": "TO BE UPDATED SOON", "description": "Component list pending.", "components": []},
-    "Source Coils - 2W": {"category": "Source Coils", "status": "TO BE UPDATED SOON", "description": "Component list pending.", "components": []},
-    "Light Coils - 2W": {"category": "Light Coils", "status": "TO BE UPDATED SOON", "description": "Component list pending.", "components": []},
-    "Ignition Coils - 2W": {"category": "Ignition Coils", "status": "TO BE UPDATED SOON", "description": "Component list pending.", "components": []},
-    "Igniters - 2W": {"category": "Igniters", "status": "TO BE UPDATED SOON", "description": "Component list pending.", "components": []},
-    "CDI Units - 2W CT 100": {"category": "CDI Units", "status": "TO BE UPDATED SOON", "description": "Component list pending.", "components": []},
-    "Regulator Rectifiers - 2W": {"category": "Regulator Rectifiers", "status": "TO BE UPDATED SOON", "description": "Component list pending.", "components": []},
-    "Starter Relays - 2W Old Model": {"category": "Starter Relays", "status": "TO BE UPDATED SOON", "description": "Component list pending.", "components": []},
-    "Starter Relays - 2W 12V": {"category": "Starter Relays", "status": "TO BE UPDATED SOON", "description": "Component list pending.", "components": []},
-    "Flashers - 2W": {"category": "Flashers", "status": "TO BE UPDATED SOON", "description": "Component list pending.", "components": []},
-    "Buzzers - 2W": {"category": "Buzzers", "status": "TO BE UPDATED SOON", "description": "Component list pending.", "components": []},
 }
 
-# -----------------------------
-# SESSION STATE
-# -----------------------------
+# Public product placeholders until component lists are provided.
+for _name, _cat in [
+    ("Horns DC - Windtone Black", "Horns DC"),
+    ("Horns DC - Windtone", "Horns DC"),
+    ("Horns DC - 2W", "Horns DC"),
+    ("Horns DC - 2W HD", "Horns DC"),
+    ("Horns AC - 2W 6V & 12V Flower Type", "Horns AC"),
+    ("Horns AC - 2W 6V & 12V Milano Type", "Horns AC"),
+    ("Horns AC - 2W 6V & 12V Super XL", "Horns AC"),
+    ("Stators - 2W", "Stators"),
+    ("Source Coils - 2W", "Source Coils"),
+    ("Light Coils - 2W", "Light Coils"),
+    ("Ignition Coils - 2W", "Ignition Coils"),
+    ("Igniters - 2W", "Igniters"),
+    ("CDI Units - 2W CT 100", "CDI Units"),
+    ("Regulator Rectifiers - 2W", "Regulator Rectifiers"),
+    ("Starter Relays - 2W Old Model", "Starter Relays"),
+    ("Starter Relays - 2W 12V", "Starter Relays"),
+    ("Flashers - 2W", "Flashers"),
+    ("Buzzers - 2W", "Buzzers"),
+]:
+    PRODUCTS.setdefault(_name, {
+        "category": _cat,
+        "status": "TO BE UPDATED SOON",
+        "description": "Component list to be updated soon",
+        "materials": []
+    })
 
-if "selected_product" not in st.session_state:
-    st.session_state.selected_product = "SHINE NEW"
+# ── State ─────────────────────────────────────────────────────────────────────
+if "product_name" not in st.session_state:
+    st.session_state.product_name = "SHINE NEW"
+if "qty" not in st.session_state:
+    st.session_state.qty = 1000
+if "stock" not in st.session_state:
+    st.session_state.stock = {}
 
-if "production_quantity" not in st.session_state:
-    st.session_state.production_quantity = 1000
+# ── Helpers ───────────────────────────────────────────────────────────────────
+def mm_display(val_mm):
+    val_mm = float(val_mm or 0)
+    m = val_mm / 1000
+    if m == int(m):
+        return f"{int(val_mm):,} mm / {int(m):,} m"
+    return f"{int(val_mm):,} mm / {m:.2f} m"
 
-if "stock_values" not in st.session_state:
-    st.session_state.stock_values = {}
-
-# -----------------------------
-# HELPERS
-# -----------------------------
-
-def stock_key(product_name, material, specification, unit):
-    return f"{product_name}|{material}|{specification}|{unit}"
-
-def format_qty(value, unit):
-    value = float(value or 0)
-    if unit == "pcs":
-        return f"{value:,.0f} pcs"
+def qty_display(value, unit):
     if unit == "mm":
-        return f"{value:,.0f} mm / {value / 1000:,.2f} m"
-    return f"{value:,.2f} {unit}"
+        return mm_display(value)
+    return f"{int(float(value or 0)):,} pcs"
 
-def product_has_bom(product_name):
-    return len(PRODUCTS[product_name]["components"]) > 0
+def stock_id(product, material, spec, unit):
+    return f"{product}|{material}|{spec}|{unit}"
 
-def required_df(product_name, quantity):
-    product = PRODUCTS[product_name]
+def has_materials(product):
+    return len(PRODUCTS[product]["materials"]) > 0
+
+def required_rows(product, qty):
     rows = []
-    for item in product["components"]:
-        total_needed = float(item["Required Per Unit"]) * float(quantity)
+    for m in PRODUCTS[product]["materials"]:
+        total = m["Needed for 1"] * qty
         rows.append({
-            "Material": item["Material"],
-            "Specification": item["Specification"],
-            "Unit": item["Unit"],
-            "Required for 1 Piece": float(item["Required Per Unit"]),
-            "Total Required": total_needed,
+            "Material": m["Material"],
+            "Specification": m["Specification"],
+            "Unit": m["Unit"],
+            "Needed for 1": m["Needed for 1"],
+            "Total Required": total,
+        })
+    return rows
+
+def required_display(product, qty):
+    rows = []
+    for r in required_rows(product, qty):
+        rows.append({
+            "Material": r["Material"],
+            "Specification": r["Specification"],
+            "Unit": r["Unit"],
+            "Needed for 1": qty_display(r["Needed for 1"], r["Unit"]),
+            "Total Required": qty_display(r["Total Required"], r["Unit"]),
         })
     return pd.DataFrame(rows)
 
-def required_display_df(df):
-    if df.empty:
-        return df
-    display = df.copy()
-    display["Required for 1 Piece"] = [
-        format_qty(v, u) for v, u in zip(display["Required for 1 Piece"], display["Unit"])
-    ]
-    display["Total Required"] = [
-        format_qty(v, u) for v, u in zip(display["Total Required"], display["Unit"])
-    ]
-    return display
+def stock_editor_df(product, qty):
+    rows = []
+    for r in required_rows(product, qty):
+        key = stock_id(product, r["Material"], r["Specification"], r["Unit"])
+        rows.append({
+            "Material": r["Material"],
+            "Specification": r["Specification"],
+            "Unit": r["Unit"],
+            "Needed for 1": qty_display(r["Needed for 1"], r["Unit"]),
+            "Total Required": qty_display(r["Total Required"], r["Unit"]),
+            "Stock Available": int(st.session_state.stock.get(key, 0) or 0),
+        })
+    return pd.DataFrame(rows)
 
-def stock_input_df(product_name, quantity):
-    df = required_df(product_name, quantity)
-    if df.empty:
-        return df
-
-    stock_list = []
-    for _, row in df.iterrows():
-        key = stock_key(product_name, row["Material"], row["Specification"], row["Unit"])
-        stock_list.append(float(st.session_state.stock_values.get(key, 0) or 0))
-
-    df["Stock Available"] = stock_list
-    return df
-
-def save_stock(product_name, edited_df):
+def save_stock_from_editor(product, edited_df):
     for _, row in edited_df.iterrows():
-        key = stock_key(product_name, row["Material"], row["Specification"], row["Unit"])
-        st.session_state.stock_values[key] = float(row.get("Stock Available", 0) or 0)
+        key = stock_id(product, row["Material"], row["Specification"], row["Unit"])
+        st.session_state.stock[key] = int(row.get("Stock Available", 0) or 0)
 
-def final_df(product_name, quantity):
-    df = stock_input_df(product_name, quantity)
-    if df.empty:
-        return df
-
-    df["Stock Available"] = pd.to_numeric(df["Stock Available"], errors="coerce").fillna(0)
-    df["Total Required"] = pd.to_numeric(df["Total Required"], errors="coerce").fillna(0)
-
-    df["Order Quantity"] = (df["Total Required"] - df["Stock Available"]).clip(lower=0)
-    df["Balance After Production"] = df["Stock Available"] - df["Total Required"]
-    df["Status"] = df["Order Quantity"].apply(lambda x: "Enough Stock" if x == 0 else "Order Required")
-    return df
-
-def final_display_df(df):
-    if df.empty:
-        return df
-
-    display = df.copy()
-    for col in ["Required for 1 Piece", "Total Required", "Stock Available", "Order Quantity", "Balance After Production"]:
-        display[col] = [format_qty(v, u) for v, u in zip(display[col], display["Unit"])]
-
-    return display[[
-        "Material",
-        "Specification",
-        "Unit",
-        "Required for 1 Piece",
-        "Total Required",
-        "Stock Available",
-        "Order Quantity",
-        "Balance After Production",
-        "Status",
-    ]]
-
-def download_csv(df, product_name, quantity):
-    export = df.copy()
-    export.insert(0, "Product", product_name)
-    export.insert(1, "Production Quantity", quantity)
-    export.insert(2, "Generated At", datetime.now().strftime("%Y-%m-%d %H:%M"))
-    return export.to_csv(index=False).encode("utf-8")
-
-def product_catalogue_df():
+def final_raw(product, qty):
     rows = []
-    for name, data in PRODUCTS.items():
+    for m in PRODUCTS[product]["materials"]:
+        total_needed = int(m["Needed for 1"] * qty)
+        key = stock_id(product, m["Material"], m["Specification"], m["Unit"])
+        stock = int(st.session_state.stock.get(key, 0) or 0)
+        order_qty = max(0, total_needed - stock)
+        balance = stock - total_needed
         rows.append({
-            "Product": name,
-            "Category": data["category"],
-            "Status": data["status"],
-            "Component Lines": len(data["components"]),
+            "Material": m["Material"],
+            "Specification": m["Specification"],
+            "Unit": m["Unit"],
+            "Needed for 1": m["Needed for 1"],
+            "Total Required": total_needed,
+            "Stock Available": stock,
+            "Order Quantity": order_qty,
+            "Balance After Making": balance,
+            "Status": "Enough Stock" if order_qty == 0 else "Order Required",
         })
     return pd.DataFrame(rows)
 
-# -----------------------------
-# STYLE
-# -----------------------------
+def final_display(df):
+    rows = []
+    for _, r in df.iterrows():
+        unit = r["Unit"]
+        balance = r["Balance After Making"]
+        if unit == "mm" and balance < 0:
+            bal_disp = "-" + mm_display(abs(balance))
+        else:
+            bal_disp = qty_display(balance, unit)
+        rows.append({
+            "Material": r["Material"],
+            "Specification": r["Specification"],
+            "Unit": unit,
+            "Needed for 1": qty_display(r["Needed for 1"], unit),
+            "Total Required": qty_display(r["Total Required"], unit),
+            "Stock Available": qty_display(r["Stock Available"], unit),
+            "Order Quantity": qty_display(r["Order Quantity"], unit),
+            "Balance After Making": bal_disp,
+            "Status": r["Status"],
+        })
+    return pd.DataFrame(rows)
 
+def csv_bytes(df, product, qty):
+    export = df.copy()
+    export.insert(0, "Product", product)
+    export.insert(1, "Production Quantity", qty)
+    export.insert(2, "Generated At", datetime.now().strftime("%Y-%m-%d %H:%M"))
+    buf = io.StringIO()
+    export.to_csv(buf, index=False)
+    return buf.getvalue().encode("utf-8")
+
+def page_selection_panel():
+    st.markdown('<div class="info-card">', unsafe_allow_html=True)
+    col1, col2 = st.columns([1.35, 1])
+    with col1:
+        st.session_state.product_name = st.selectbox(
+            "Select product",
+            list(PRODUCTS.keys()),
+            index=list(PRODUCTS.keys()).index(st.session_state.product_name),
+        )
+    with col2:
+        st.session_state.qty = st.number_input(
+            "How many pieces to make?",
+            min_value=0,
+            value=int(st.session_state.qty),
+            step=1,
+        )
+    info = PRODUCTS[st.session_state.product_name]
+    st.caption(f"📋 {info['category']} • {info['description']}")
+    st.markdown('</div>', unsafe_allow_html=True)
+
+# ── Header ─────────────────────────────────────────────────────────────────────
 st.markdown("""
-<style>
-    .block-container {
-        max-width: 1180px;
-        padding-top: 1.5rem;
-        padding-bottom: 3rem;
-    }
-
-    .top-card {
-        background: #ffffff;
-        border: 1px solid #e1e7ef;
-        border-radius: 18px;
-        padding: 24px 28px;
-        margin-bottom: 18px;
-        box-shadow: 0 8px 22px rgba(20, 35, 60, 0.05);
-    }
-
-    .brand {
-        color: #1f4e8c;
-        font-size: 0.82rem;
-        font-weight: 800;
-        letter-spacing: 0.08em;
-        text-transform: uppercase;
-        margin-bottom: 6px;
-    }
-
-    .main-title {
-        color: #172033;
-        font-size: 2.35rem;
-        line-height: 1.08;
-        font-weight: 850;
-        letter-spacing: -0.04em;
-        margin: 0;
-    }
-
-    .subtitle {
-        color: #5b677a;
-        font-size: 1.03rem;
-        margin-top: 8px;
-    }
-
-    .panel {
-        background: #ffffff;
-        border: 1px solid #e1e7ef;
-        border-radius: 18px;
-        padding: 20px 22px;
-        margin-bottom: 18px;
-        box-shadow: 0 8px 22px rgba(20, 35, 60, 0.04);
-    }
-
-    .step-label {
-        color: #1f4e8c;
-        font-size: 0.82rem;
-        font-weight: 800;
-        text-transform: uppercase;
-        letter-spacing: 0.08em;
-        margin-bottom: 3px;
-    }
-
-    .panel-title {
-        color: #172033;
-        font-size: 1.35rem;
-        font-weight: 800;
-        margin-bottom: 6px;
-    }
-
-    .panel-help {
-        color: #5b677a;
-        font-size: 0.98rem;
-        margin-bottom: 14px;
-    }
-
-    .warning {
-        background: #fff8e8;
-        border: 1px solid #efc36b;
-        color: #5c3b00;
-        border-radius: 14px;
-        padding: 14px 16px;
-        margin: 12px 0 16px 0;
-        font-size: 1rem;
-    }
-
-    .pending-box {
-        background: #fff8e8;
-        border: 1px solid #efc36b;
-        color: #5c3b00;
-        border-radius: 14px;
-        padding: 18px 20px;
-        margin-top: 14px;
-        font-size: 1rem;
-    }
-
-    div[data-testid="stMetric"] {
-        background: #ffffff;
-        border: 1px solid #e1e7ef;
-        border-radius: 16px;
-        padding: 14px;
-        box-shadow: 0 6px 16px rgba(20, 35, 60, 0.04);
-    }
-
-    .stDownloadButton > button {
-        background: #1f4e8c !important;
-        color: white !important;
-        border: 1px solid #1f4e8c !important;
-        border-radius: 12px !important;
-        font-weight: 750 !important;
-        height: 45px;
-    }
-
-    .stButton > button {
-        border-radius: 12px !important;
-        font-weight: 700 !important;
-    }
-
-    .footer {
-        color: #6b7280;
-        font-size: 0.88rem;
-        text-align: center;
-        margin-top: 22px;
-    }
-</style>
-""", unsafe_allow_html=True)
-
-# -----------------------------
-# SIDEBAR NAVIGATION
-# -----------------------------
-
-st.sidebar.title("ECL Planner")
-st.sidebar.caption("Material Requirement Workflow")
-
-page = st.sidebar.radio(
-    "Pages",
-    [
-        "1. Required Components",
-        "2. Stock Entry",
-        "3. Final Summary",
-        "Product List",
-    ],
-)
-
-st.sidebar.divider()
-st.sidebar.write("**Workflow**")
-st.sidebar.write("1. Check required components")
-st.sidebar.write("2. Enter available stock")
-st.sidebar.write("3. Download final requirement")
-
-# -----------------------------
-# HEADER
-# -----------------------------
-
-st.markdown("""
-<div class="top-card">
-    <div class="brand">ECL India • Internal Factory Tool</div>
-    <div class="main-title">Material Requirement Planner</div>
-    <div class="subtitle">
-        A simple three-step tool for checking production material, entering stock, and preparing the final order requirement.
-    </div>
+<div class="ecl-header">
+    <h1>🏭 ECL Material Calculator</h1>
+    <p>Three-step production material planner: required components, stock entry, and final business requirement.</p>
 </div>
 """, unsafe_allow_html=True)
 
-# -----------------------------
-# COMMON SELECTION PANEL
-# -----------------------------
+# ── Navigation ─────────────────────────────────────────────────────────────────
+st.sidebar.title("ECL Planner")
+st.sidebar.caption("Internal factory workflow")
+page = st.sidebar.radio(
+    "Go to page",
+    ["1. Required Components", "2. Stock Entry", "3. Final Summary", "Product List"],
+)
+st.sidebar.divider()
+st.sidebar.write("**Workflow**")
+st.sidebar.write("1. See required components")
+st.sidebar.write("2. Enter available stock")
+st.sidebar.write("3. Download final summary")
 
-if page != "Product List":
-    st.markdown('<div class="panel">', unsafe_allow_html=True)
-    st.markdown('<div class="panel-title">Production selection</div>', unsafe_allow_html=True)
-    st.markdown('<div class="panel-help">Select the product and quantity. The same selection is used across all three steps.</div>', unsafe_allow_html=True)
+# ── Product List ───────────────────────────────────────────────────────────────
+if page == "Product List":
+    st.markdown('<div class="step-label">Product List</div>', unsafe_allow_html=True)
+    st.write("Products without component lists are marked **TO BE UPDATED SOON** until you provide the material sheet.")
+    cat_rows = []
+    for name, data in PRODUCTS.items():
+        cat_rows.append({
+            "Product": name,
+            "Category": data["category"],
+            "Status": data["status"],
+            "Component Lines": len(data["materials"]),
+        })
+    cat_df = pd.DataFrame(cat_rows)
+    ready = int((cat_df["Status"] == "READY").sum())
+    pending = len(cat_df) - ready
+    st.markdown(f"""
+    <div class="summary-row">
+      <div class="sum-card sum-blue"><div class="sc-num">{len(cat_df)}</div><div class="sc-lbl">Total Products</div></div>
+      <div class="sum-card sum-green"><div class="sc-num">{ready}</div><div class="sc-lbl">Ready</div></div>
+      <div class="sum-card sum-orange"><div class="sc-num">{pending}</div><div class="sc-lbl">To Be Updated</div></div>
+    </div>
+    """, unsafe_allow_html=True)
+    st.dataframe(cat_df, use_container_width=True, hide_index=True)
+    st.stop()
 
-    c1, c2 = st.columns([1.7, 1])
-    with c1:
-        st.session_state.selected_product = st.selectbox(
-            "Product / Model",
-            list(PRODUCTS.keys()),
-            index=list(PRODUCTS.keys()).index(st.session_state.selected_product),
-        )
-        selected_info = PRODUCTS[st.session_state.selected_product]
-        st.caption(f"{selected_info['category']} • {selected_info['description']}")
-    with c2:
-        st.session_state.production_quantity = st.number_input(
-            "How many finished pieces to make?",
-            min_value=0,
-            value=int(st.session_state.production_quantity),
-            step=1,
-        )
+# Common selection on the 3 workflow pages
+page_selection_panel()
+product_name = st.session_state.product_name
+qty = st.session_state.qty
 
-    st.markdown("</div>", unsafe_allow_html=True)
+if not has_materials(product_name):
+    st.markdown(f"""
+    <div class="pending-box">
+    <strong>{product_name}</strong><br>
+    Component list is <strong>TO BE UPDATED SOON</strong>. Upload/provide the material sheet for this product before calculation.
+    </div>
+    """, unsafe_allow_html=True)
+    st.stop()
 
-    selected_product = st.session_state.selected_product
-    quantity = st.session_state.production_quantity
-    product_info = PRODUCTS[selected_product]
-
-    if not product_has_bom(selected_product):
-        st.markdown(
-            f"""
-            <div class="pending-box">
-                <b>{selected_product}</b><br>
-                Component list is <b>to be updated soon</b>. Upload or enter the internal BOM/material sheet before calculating this product.
-            </div>
-            """,
-            unsafe_allow_html=True,
-        )
-
-# -----------------------------
-# PAGE 1: REQUIRED COMPONENTS
-# -----------------------------
-
+# ── Page 1: Required Components ────────────────────────────────────────────────
 if page == "1. Required Components":
-    if product_has_bom(selected_product):
-        df = required_df(selected_product, quantity)
+    st.markdown('<div class="step-label">Step 1 — Required components</div>', unsafe_allow_html=True)
+    st.write("This page shows everything required for the selected production quantity before checking stock.")
 
-        st.markdown('<div class="panel">', unsafe_allow_html=True)
-        st.markdown('<div class="step-label">Step 1</div>', unsafe_allow_html=True)
-        st.markdown('<div class="panel-title">Components required for production</div>', unsafe_allow_html=True)
-        st.markdown(
-            '<div class="panel-help">This page shows the full material required before checking stock. You can download this list for stores or purchase planning.</div>',
-            unsafe_allow_html=True,
-        )
+    req_df = required_display(product_name, qty)
+    raw_req = pd.DataFrame(required_rows(product_name, qty))
 
-        m1, m2, m3 = st.columns(3)
-        m1.metric("Product", selected_product)
-        m2.metric("Production Quantity", f"{quantity:,.0f}")
-        m3.metric("Component Lines", len(df))
+    wire_total = raw_req.loc[raw_req["Unit"] == "mm", "Total Required"].sum()
+    part_lines = int((raw_req["Unit"] == "pcs").sum())
+    wire_lines = int((raw_req["Unit"] == "mm").sum())
 
-        st.dataframe(required_display_df(df), use_container_width=True, hide_index=True)
+    st.markdown(f"""
+    <div class="summary-row">
+      <div class="sum-card sum-blue"><div class="sc-num">{qty:,}</div><div class="sc-lbl">Pieces To Make</div></div>
+      <div class="sum-card sum-blue"><div class="sc-num">{len(req_df)}</div><div class="sc-lbl">Component Lines</div></div>
+      <div class="sum-card sum-blue"><div class="sc-num">{part_lines}</div><div class="sc-lbl">Part Lines</div></div>
+      <div class="sum-card sum-blue"><div class="sc-num">{wire_total/1000:,.2f} m</div><div class="sc-lbl">Total Wire Required</div></div>
+    </div>
+    """, unsafe_allow_html=True)
 
-        st.download_button(
-            "Download Required Components",
-            data=download_csv(df, selected_product, quantity),
-            file_name=f"{selected_product.replace(' ', '_')}_required_components.csv",
-            mime="text/csv",
-            use_container_width=True,
-        )
-        st.markdown("</div>", unsafe_allow_html=True)
-
-# -----------------------------
-# PAGE 2: STOCK ENTRY
-# -----------------------------
-
-elif page == "2. Stock Entry":
-    if product_has_bom(selected_product):
-        df = stock_input_df(selected_product, quantity)
-
-        st.markdown('<div class="panel">', unsafe_allow_html=True)
-        st.markdown('<div class="step-label">Step 2</div>', unsafe_allow_html=True)
-        st.markdown('<div class="panel-title">Enter stock available</div>', unsafe_allow_html=True)
-        st.markdown(
-            '<div class="panel-help">Enter what you currently have in stock. It is completely okay to keep stock as 0 if you do not know or do not want to enter it.</div>',
-            unsafe_allow_html=True,
-        )
-        st.markdown(
-            '<div class="warning"><b>Important:</b> Keep stock as 0 if you do not want to enter it. The app will still calculate the full requirement. For wire, enter stock in millimetres. Example: 500 metres = 500000 mm.</div>',
-            unsafe_allow_html=True,
-        )
-
-        edited = st.data_editor(
-            df,
-            hide_index=True,
-            use_container_width=True,
-            num_rows="fixed",
-            disabled=["Material", "Specification", "Unit", "Required for 1 Piece", "Total Required"],
-            column_order=["Material", "Specification", "Unit", "Required for 1 Piece", "Total Required", "Stock Available"],
-            column_config={
-                "Material": st.column_config.TextColumn("Material", width="medium"),
-                "Specification": st.column_config.TextColumn("Specification", width="large"),
-                "Unit": st.column_config.TextColumn("Unit", width="small"),
-                "Required for 1 Piece": st.column_config.NumberColumn("Required for 1", width="small"),
-                "Total Required": st.column_config.NumberColumn("Total Required", width="medium"),
-                "Stock Available": st.column_config.NumberColumn("Stock Available", min_value=0, step=1, width="medium"),
-            },
-            key=f"stock_editor_{selected_product}_{quantity}",
-        )
-
-        save_stock(selected_product, edited)
-
-        st.success("Stock values saved for this session. Go to Step 3 to see the final requirement.")
-        st.markdown("</div>", unsafe_allow_html=True)
-
-# -----------------------------
-# PAGE 3: FINAL SUMMARY
-# -----------------------------
-
-elif page == "3. Final Summary":
-    if product_has_bom(selected_product):
-        df = final_df(selected_product, quantity)
-
-        enough = int((df["Order Quantity"] == 0).sum())
-        order_required = int((df["Order Quantity"] > 0).sum())
-        pcs_to_order = df[df["Unit"] == "pcs"]["Order Quantity"].sum()
-        wire_to_order_mm = df[df["Unit"] == "mm"]["Order Quantity"].sum()
-
-        st.markdown('<div class="panel">', unsafe_allow_html=True)
-        st.markdown('<div class="step-label">Step 3</div>', unsafe_allow_html=True)
-        st.markdown('<div class="panel-title">Final business requirement</div>', unsafe_allow_html=True)
-        st.markdown(
-            '<div class="panel-help">This page compares required material against available stock and shows what must be ordered.</div>',
-            unsafe_allow_html=True,
-        )
-
-        s1, s2, s3, s4 = st.columns(4)
-        s1.metric("Enough Stock", enough)
-        s2.metric("Need Order", order_required)
-        s3.metric("Parts To Order", f"{pcs_to_order:,.0f} pcs")
-        s4.metric("Wire To Order", f"{wire_to_order_mm / 1000:,.2f} m")
-
-        final_table = final_display_df(df)
-
-        def style_status(row):
-            styles = [""] * len(row)
-            if row["Status"] == "Order Required":
-                styles[row.index.get_loc("Status")] = "background-color:#fff1e6;color:#9a3412;font-weight:800;"
-                styles[row.index.get_loc("Order Quantity")] = "color:#9a3412;font-weight:800;"
-            else:
-                styles[row.index.get_loc("Status")] = "background-color:#eaf7ee;color:#166534;font-weight:800;"
-            return styles
-
-        st.dataframe(final_table.style.apply(style_status, axis=1), use_container_width=True, hide_index=True)
-
-        st.download_button(
-            "Download Final Summary File",
-            data=download_csv(df, selected_product, quantity),
-            file_name=f"{selected_product.replace(' ', '_')}_final_business_requirement.csv",
-            mime="text/csv",
-            use_container_width=True,
-        )
-
-        st.markdown("</div>", unsafe_allow_html=True)
-
-# -----------------------------
-# PRODUCT LIST
-# -----------------------------
-
-elif page == "Product List":
-    st.markdown('<div class="panel">', unsafe_allow_html=True)
-    st.markdown('<div class="panel-title">ECL Product List</div>', unsafe_allow_html=True)
-    st.markdown(
-        '<div class="panel-help">Products with full material data can be calculated now. Other products are marked to be updated soon until their component list is provided.</div>',
-        unsafe_allow_html=True,
+    st.dataframe(req_df, use_container_width=True, hide_index=True)
+    st.download_button(
+        "⬇️ Download Required Components",
+        data=csv_bytes(raw_req, product_name, qty),
+        file_name=f"ECL_Required_Components_{product_name.replace(' ', '_')}_{qty}pcs.csv",
+        mime="text/csv",
     )
 
-    cat_df = product_catalogue_df()
-    ready_count = int((cat_df["Status"] == "READY").sum())
-    pending_count = int((cat_df["Status"] != "READY").sum())
+# ── Page 2: Stock Entry ───────────────────────────────────────────────────────
+elif page == "2. Stock Entry":
+    st.markdown('<div class="step-label">Step 2 — Enter stock available</div>', unsafe_allow_html=True)
+    st.write("Enter how much material you currently have. It is okay to keep stock as **0** if you do not want to enter it.")
+    st.markdown("""
+    <div class="warn-box">
+    ⚠️ <strong>Important:</strong> Keep stock as <strong>0</strong> if you do not know it. The app will still calculate the full requirement.
+    For parts, enter pieces. For wire, enter millimetres. Example: 500 metres = 500,000 mm.
+    </div>
+    """, unsafe_allow_html=True)
 
-    c1, c2, c3 = st.columns(3)
-    c1.metric("Total Products", len(cat_df))
-    c2.metric("Ready", ready_count)
-    c3.metric("To Be Updated", pending_count)
+    edf = stock_editor_df(product_name, qty)
+    edited = st.data_editor(
+        edf,
+        use_container_width=True,
+        hide_index=True,
+        disabled=["Material", "Specification", "Unit", "Needed for 1", "Total Required"],
+        column_config={
+            "Stock Available": st.column_config.NumberColumn(
+                "Stock Available",
+                help="Enter current stock. Keep as 0 if unknown or not entered.",
+                min_value=0,
+                step=1,
+                format="%d",
+            )
+        },
+        key=f"stock_editor_{product_name}_{qty}",
+    )
+    save_stock_from_editor(product_name, edited)
+    st.success("Stock values saved for this session. Go to Step 3 to see the final business requirement.")
 
-    st.dataframe(cat_df, use_container_width=True, hide_index=True)
-    st.markdown("</div>", unsafe_allow_html=True)
+# ── Page 3: Final Summary ─────────────────────────────────────────────────────
+elif page == "3. Final Summary":
+    st.markdown('<div class="step-label">Step 3 — Final business requirement</div>', unsafe_allow_html=True)
+    st.write("This page compares required material with available stock and shows what needs to be ordered.")
 
-st.markdown('<div class="footer">ECL India Material Requirement Planner • Internal factory use</div>', unsafe_allow_html=True)
+    raw = final_raw(product_name, qty)
+    display = final_display(raw)
+
+    n_enough = int((raw["Order Quantity"] == 0).sum())
+    n_order = int((raw["Order Quantity"] > 0).sum())
+    pieces_to_order = raw.loc[raw["Unit"] == "pcs", "Order Quantity"].sum()
+    wire_to_order = raw.loc[raw["Unit"] == "mm", "Order Quantity"].sum()
+
+    st.markdown(f"""
+    <div class="summary-row">
+      <div class="sum-card sum-green"><div class="sc-num">{n_enough}</div><div class="sc-lbl">Enough Stock</div></div>
+      <div class="sum-card sum-orange"><div class="sc-num">{n_order}</div><div class="sc-lbl">Need Order</div></div>
+      <div class="sum-card sum-blue"><div class="sc-num">{int(pieces_to_order):,}</div><div class="sc-lbl">Parts To Order</div></div>
+      <div class="sum-card sum-blue"><div class="sc-num">{wire_to_order/1000:,.2f} m</div><div class="sc-lbl">Wire To Order</div></div>
+    </div>
+    """, unsafe_allow_html=True)
+
+    def colour_status(val):
+        if "Enough" in str(val):
+            return "background-color: #DCFCE7; color: #15803D; font-weight: 600;"
+        if "Order" in str(val):
+            return "background-color: #FFEDD5; color: #C2410C; font-weight: 600;"
+        return ""
+
+    styled = display.style.map(colour_status, subset=["Status"])
+    st.dataframe(styled, use_container_width=True, hide_index=True)
+
+    st.download_button(
+        "⬇️ Download Final Summary File",
+        data=csv_bytes(raw, product_name, qty),
+        file_name=f"ECL_Final_Summary_{product_name.replace(' ', '_')}_{qty}pcs.csv",
+        mime="text/csv",
+    )

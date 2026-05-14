@@ -1,6 +1,6 @@
-# ECL Material Requirement Planner
+# ECL Material Calculator
 
-Three-page Streamlit app for factory material planning.
+Three-page version based on the approved baseline UI.
 
 ## Pages
 
@@ -9,18 +9,8 @@ Three-page Streamlit app for factory material planning.
 3. Final Summary
 4. Product List
 
-## Deployment
+## Deploy
 
-Upload to GitHub and deploy on Streamlit Community Cloud.
+Upload these files to GitHub and deploy on Streamlit Community Cloud.
 
-Main file path:
-
-app.py
-
-## Required files
-
-- app.py
-- requirements.txt
-- runtime.txt
-- README.md
-- .streamlit/config.toml
+Main file path: `app.py`
