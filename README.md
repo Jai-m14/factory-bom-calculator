@@ -1,27 +1,26 @@
-# Factory Material Calculator - Simple UI
+# ECL Factory Material Planner
 
-A simplified Streamlit calculator for factory material planning.
+Professional Streamlit app for ECL-style factory material requirement planning.
 
-## Files
+## Upload to GitHub
+
+Files required:
 
 - app.py
 - requirements.txt
 - runtime.txt
 - README.md
 
-## Run locally
-
-```bash
-pip install -r requirements.txt
-streamlit run app.py
-```
-
-## Deploy
-
-Upload these files to GitHub and deploy on Streamlit Community Cloud.
+## Deploy on Streamlit Cloud
 
 Main file path:
 
 ```text
 app.py
 ```
+
+## Notes
+
+- SHINE NEW and SHINE OLD include full BOM data from the provided Excel sheet.
+- Other ECL catalogue products are placeholders until internal BOMs are added.
+- Stock is optional. Blank stock is treated as zero.
