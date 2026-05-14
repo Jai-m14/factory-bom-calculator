@@ -1,15 +1,9 @@
-# ECL Material Requirement Planner
+# ECL Material Calculator
 
-Clean Streamlit app for ECL India style factory material planning.
+Simple parent-friendly material calculator.
 
-## Files to upload
+Upload these files to GitHub and deploy on Streamlit Cloud.
 
-- app.py
-- requirements.txt
-- runtime.txt
-- README.md
-- .streamlit/config.toml
-
-## Streamlit main file path
+Main file path:
 
 app.py
