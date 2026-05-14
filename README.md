@@ -1,13 +1,14 @@
-# ECL Material Planner
+# ECL Material Requirement Planner
 
-Clean professional Streamlit app for ECL India style factory material planning.
+Clean Streamlit app for ECL India style factory material planning.
 
-## Upload files
+## Files to upload
 
 - app.py
 - requirements.txt
 - runtime.txt
 - README.md
+- .streamlit/config.toml
 
 ## Streamlit main file path
 

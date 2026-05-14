@@ -1,16 +1,25 @@
+from __future__ import annotations
 
-import streamlit as st
-import pandas as pd
 from datetime import datetime
+from typing import Dict, List
+
+import pandas as pd
+import streamlit as st
 
 st.set_page_config(
     page_title="ECL Material Planner",
     page_icon="🏭",
     layout="wide",
-    initial_sidebar_state="expanded"
+    initial_sidebar_state="collapsed",
 )
 
-DEFAULT_PRODUCTS = {
+# -----------------------------------------------------------------------------
+# Default BOM data
+# -----------------------------------------------------------------------------
+
+Product = Dict[str, object]
+
+DEFAULT_PRODUCTS: Dict[str, Product] = {
     "SHINE NEW": {
         "category": "Stators / Wire Harness",
         "description": "Wire Shine Stator harness - new model using Cup Blue CB104.",
@@ -47,7 +56,7 @@ DEFAULT_PRODUCTS = {
     },
 }
 
-ECL_CATALOGUE = [
+CATALOGUE_PLACEHOLDERS = [
     ("Horns DC - Windtone Black", "Horns DC"),
     ("Horns DC - Windtone", "Horns DC"),
     ("Horns DC - 2W", "Horns DC"),
@@ -70,403 +79,354 @@ ECL_CATALOGUE = [
 
 ALLOWED_UNITS = ["pcs", "mm", "m", "kg", "g", "litre", "ml"]
 
-def init_state():
+# -----------------------------------------------------------------------------
+# State and helpers
+# -----------------------------------------------------------------------------
+
+
+def initialise_state() -> None:
     if "products" not in st.session_state:
-        products = {k: v.copy() for k, v in DEFAULT_PRODUCTS.items()}
-        for product_name, category in ECL_CATALOGUE:
-            if product_name not in products:
-                products[product_name] = {
+        products = {name: data.copy() for name, data in DEFAULT_PRODUCTS.items()}
+        for name, category in CATALOGUE_PLACEHOLDERS:
+            products.setdefault(
+                name,
+                {
                     "category": category,
-                    "description": "Catalogue item. Add internal BOM before calculation.",
+                    "description": "Catalogue placeholder. Add internal BOM before calculation.",
                     "components": [],
-                }
+                },
+            )
         st.session_state.products = products
 
-    if "stock_store" not in st.session_state:
-        st.session_state.stock_store = {}
+    if "stock" not in st.session_state:
+        st.session_state.stock = {}
 
-init_state()
 
-def component_key(row):
+initialise_state()
+
+
+def component_key(row: pd.Series | dict) -> str:
     return f"{row['Component Name']}|{row['Specification']}|{row['Unit']}"
 
-def format_quantity(value, unit):
+
+def format_quantity(value: float, unit: str) -> str:
     value = float(value or 0)
     if unit == "pcs":
         return f"{value:,.0f} pcs"
     if unit == "mm":
         return f"{value:,.0f} mm ({value / 1000:,.2f} m)"
+    if unit in {"m", "kg", "g", "litre", "ml"}:
+        return f"{value:,.2f} {unit}"
     return f"{value:,.2f} {unit}"
 
-def get_product_df(product_name):
+
+def product_dataframe(product_name: str) -> pd.DataFrame:
     product = st.session_state.products[product_name]
     df = pd.DataFrame(product["components"])
     if df.empty:
         return pd.DataFrame(columns=["Component Name", "Specification", "Unit", "Required Per Unit", "Stock In Hand"])
-    df["Required Per Unit"] = pd.to_numeric(df["Required Per Unit"], errors="coerce").fillna(0)
-    df["Stock In Hand"] = [float(st.session_state.stock_store.get(component_key(row), 0) or 0) for _, row in df.iterrows()]
+
+    df["Required Per Unit"] = pd.to_numeric(df["Required Per Unit"], errors="coerce").fillna(0.0)
+    df["Stock In Hand"] = [float(st.session_state.stock.get(component_key(row), 0) or 0) for _, row in df.iterrows()]
     return df
 
-def save_stock_from_df(df):
-    for _, row in df.iterrows():
-        st.session_state.stock_store[component_key(row)] = float(row.get("Stock In Hand", 0) or 0)
 
-def calculate(df, quantity, wastage):
-    if df.empty:
-        return df
+def save_stock(df: pd.DataFrame) -> None:
+    for _, row in df.iterrows():
+        st.session_state.stock[component_key(row)] = float(row.get("Stock In Hand", 0) or 0)
+
+
+def calculate_requirements(df: pd.DataFrame, quantity: int, wastage_percent: float) -> pd.DataFrame:
     result = df.copy()
-    result["Required Per Unit"] = pd.to_numeric(result["Required Per Unit"], errors="coerce").fillna(0)
-    result["Stock In Hand"] = pd.to_numeric(result["Stock In Hand"], errors="coerce").fillna(0)
+    if result.empty:
+        return result
+
+    result["Required Per Unit"] = pd.to_numeric(result["Required Per Unit"], errors="coerce").fillna(0.0)
+    result["Stock In Hand"] = pd.to_numeric(result["Stock In Hand"], errors="coerce").fillna(0.0)
     result["Total Needed"] = result["Required Per Unit"] * quantity
-    material_mask = result["Unit"].isin(["mm", "m", "kg", "g", "litre", "ml"])
-    result.loc[material_mask, "Total Needed"] *= (1 + wastage / 100)
+
+    wastage_units = result["Unit"].isin(["mm", "m", "kg", "g", "litre", "ml"])
+    result.loc[wastage_units, "Total Needed"] *= 1 + (wastage_percent / 100)
+
     result["Quantity To Order"] = (result["Total Needed"] - result["Stock In Hand"]).clip(lower=0)
     result["Balance After Production"] = result["Stock In Hand"] - result["Total Needed"]
     result["Status"] = result["Quantity To Order"].apply(lambda x: "Enough Stock" if x <= 0 else "Order Required")
     return result
 
-def format_table(result):
+
+def display_table(result: pd.DataFrame) -> pd.DataFrame:
     table = result.copy()
     for col in ["Required Per Unit", "Total Needed", "Stock In Hand", "Quantity To Order", "Balance After Production"]:
-        table[col] = [format_quantity(v, u) for v, u in zip(table[col], table["Unit"])]
-    return table[[
-        "Component Name", "Specification", "Unit", "Required Per Unit",
-        "Total Needed", "Stock In Hand", "Quantity To Order",
-        "Balance After Production", "Status"
-    ]]
+        table[col] = [format_quantity(value, unit) for value, unit in zip(table[col], table["Unit"])]
+    return table[
+        [
+            "Component Name",
+            "Specification",
+            "Unit",
+            "Required Per Unit",
+            "Total Needed",
+            "Stock In Hand",
+            "Quantity To Order",
+            "Balance After Production",
+            "Status",
+        ]
+    ]
 
-def build_csv(result, product_name, quantity):
+
+def export_csv(result: pd.DataFrame, product_name: str, quantity: int) -> bytes:
     export = result.copy()
     export.insert(0, "Product / Model", product_name)
     export.insert(1, "Production Quantity", quantity)
     export.insert(2, "Generated At", datetime.now().strftime("%Y-%m-%d %H:%M"))
     return export.to_csv(index=False).encode("utf-8")
 
-st.markdown("""
-<style>
-    .stApp {
-        background: #f4f6f9;
-        color: #172033;
-    }
 
-    .block-container {
-        max-width: 1240px;
-        padding-top: 1.25rem;
-        padding-bottom: 3rem;
-    }
+def product_catalogue_df() -> pd.DataFrame:
+    rows = []
+    for name, data in st.session_state.products.items():
+        component_count = len(data.get("components", []))
+        rows.append(
+            {
+                "Product / Model": name,
+                "Category": data.get("category", "Uncategorised"),
+                "BOM Status": "Ready" if component_count else "Pending",
+                "Material Lines": component_count,
+                "Description": data.get("description", ""),
+            }
+        )
+    return pd.DataFrame(rows).sort_values(["Category", "Product / Model"])
 
-    section[data-testid="stSidebar"] {
-        background: #ffffff;
-        border-right: 1px solid #dde3ec;
-    }
 
-    section[data-testid="stSidebar"] * {
-        color: #172033 !important;
-    }
+# -----------------------------------------------------------------------------
+# Minimal styling only. Do not override Streamlit widget text colours globally.
+# -----------------------------------------------------------------------------
 
-    h1, h2, h3, h4, h5, h6, p, label, span, div {
-        color: #172033;
-    }
+st.markdown(
+    """
+    <style>
+        .block-container {
+            padding-top: 1.5rem;
+            max-width: 1220px;
+        }
+        .ecl-header {
+            background: #ffffff;
+            border: 1px solid #d7dee8;
+            border-left: 7px solid #1f4e8c;
+            border-radius: 16px;
+            padding: 24px 28px;
+            margin-bottom: 18px;
+        }
+        .ecl-kicker {
+            color: #1f4e8c;
+            font-weight: 800;
+            letter-spacing: 0.08em;
+            text-transform: uppercase;
+            font-size: 0.82rem;
+            margin-bottom: 6px;
+        }
+        .ecl-title {
+            color: #172033;
+            font-size: 2.15rem;
+            line-height: 1.12;
+            font-weight: 800;
+            margin: 0;
+        }
+        .ecl-subtitle {
+            color: #5b6675;
+            font-size: 1rem;
+            margin-top: 8px;
+            max-width: 840px;
+        }
+        .ecl-panel {
+            background: #ffffff;
+            border: 1px solid #d7dee8;
+            border-radius: 16px;
+            padding: 20px 22px;
+            margin-bottom: 18px;
+        }
+        .ecl-help {
+            color: #5b6675;
+            font-size: 0.95rem;
+            margin-bottom: 14px;
+        }
+        .unit-note {
+            background: #fff8e8;
+            border: 1px solid #efc96b;
+            border-radius: 12px;
+            padding: 12px 14px;
+            color: #664300;
+            margin-bottom: 14px;
+        }
+        .status-ready {
+            display: inline-block;
+            padding: 5px 10px;
+            border-radius: 999px;
+            background: #e9f7ef;
+            color: #166534;
+            border: 1px solid #b7e2c4;
+            font-weight: 800;
+            font-size: 0.78rem;
+        }
+        .status-pending {
+            display: inline-block;
+            padding: 5px 10px;
+            border-radius: 999px;
+            background: #fff3e2;
+            color: #9a3412;
+            border: 1px solid #ffc489;
+            font-weight: 800;
+            font-size: 0.78rem;
+        }
+        div[data-testid="stMetric"] {
+            background: #ffffff;
+            border: 1px solid #d7dee8;
+            border-radius: 14px;
+            padding: 14px 16px;
+        }
+    </style>
+    """,
+    unsafe_allow_html=True,
+)
 
-    .hero {
-        background: #ffffff;
-        border: 1px solid #dde3ec;
-        border-left: 8px solid #1f4e8c;
-        border-radius: 18px;
-        padding: 26px 30px;
-        margin-bottom: 20px;
-        box-shadow: 0 8px 22px rgba(22, 34, 51, 0.06);
-    }
+# -----------------------------------------------------------------------------
+# Header
+# -----------------------------------------------------------------------------
 
-    .brand-row {
-        display: flex;
-        align-items: center;
-        justify-content: space-between;
-        gap: 12px;
-    }
-
-    .brand {
-        color: #1f4e8c;
-        font-size: 0.82rem;
-        font-weight: 800;
-        letter-spacing: 0.1em;
-        text-transform: uppercase;
-        margin-bottom: 8px;
-    }
-
-    .hero-title {
-        color: #172033;
-        font-size: 2.35rem;
-        line-height: 1.08;
-        font-weight: 850;
-        letter-spacing: -0.04em;
-        margin: 0;
-    }
-
-    .hero-subtitle {
-        color: #526071;
-        font-size: 1.04rem;
-        margin-top: 10px;
-        max-width: 820px;
-    }
-
-    .ecl-pill {
-        border: 1px solid #c9d8ee;
-        background: #eff6ff;
-        color: #1f4e8c;
-        padding: 8px 13px;
-        border-radius: 999px;
-        font-weight: 750;
-        white-space: nowrap;
-    }
-
-    .panel {
-        background: #ffffff;
-        border: 1px solid #dde3ec;
-        border-radius: 18px;
-        padding: 20px 22px;
-        margin-bottom: 18px;
-        box-shadow: 0 8px 22px rgba(22, 34, 51, 0.05);
-    }
-
-    .panel-title {
-        color: #172033;
-        font-weight: 850;
-        font-size: 1.28rem;
-        margin-bottom: 2px;
-    }
-
-    .panel-help {
-        color: #637083;
-        font-size: 0.96rem;
-        margin-bottom: 15px;
-    }
-
-    .notice {
-        background: #fff8eb;
-        border: 1px solid #f0c56b;
-        color: #7a4b00;
-        padding: 13px 15px;
-        border-radius: 13px;
-        margin: 12px 0 16px 0;
-        font-size: 0.96rem;
-    }
-
-    .notice b {
-        color: #5c3800;
-    }
-
-    .ready-badge {
-        display: inline-block;
-        border-radius: 999px;
-        background: #eaf7ee;
-        color: #166534;
-        border: 1px solid #bce2c6;
-        font-size: 0.78rem;
-        font-weight: 800;
-        padding: 6px 10px;
-    }
-
-    .pending-badge {
-        display: inline-block;
-        border-radius: 999px;
-        background: #fff4e6;
-        color: #9a3412;
-        border: 1px solid #fdc68a;
-        font-size: 0.78rem;
-        font-weight: 800;
-        padding: 6px 10px;
-    }
-
-    div[data-testid="stMetric"] {
-        background: #ffffff;
-        border: 1px solid #dde3ec;
-        border-radius: 16px;
-        padding: 16px;
-        box-shadow: 0 6px 18px rgba(22, 34, 51, 0.05);
-    }
-
-    div[data-testid="stMetricLabel"] p {
-        color: #637083 !important;
-        font-weight: 650;
-    }
-
-    div[data-testid="stMetricValue"] {
-        color: #172033;
-        font-weight: 850;
-    }
-
-    .stButton > button, .stDownloadButton > button {
-        background: #1f4e8c !important;
-        color: #ffffff !important;
-        border: 1px solid #1f4e8c !important;
-        border-radius: 12px !important;
-        font-weight: 750 !important;
-        min-height: 42px;
-    }
-
-    .stButton > button:hover, .stDownloadButton > button:hover {
-        background: #173d70 !important;
-        color: #ffffff !important;
-        border: 1px solid #173d70 !important;
-    }
-
-    div[data-baseweb="select"] * {
-        color: #172033 !important;
-    }
-
-    input {
-        color: #172033 !important;
-    }
-
-    div[data-testid="stDataFrame"] {
-        border: 1px solid #dde3ec;
-        border-radius: 14px;
-        overflow: hidden;
-    }
-
-    .small-note {
-        color: #637083;
-        font-size: 0.88rem;
-        margin-top: 6px;
-    }
-
-    .footer {
-        color: #637083;
-        text-align: center;
-        padding: 16px;
-        font-size: 0.86rem;
-    }
-</style>
-""", unsafe_allow_html=True)
-
-st.sidebar.markdown("### ECL Material Planner")
-st.sidebar.caption("Internal production planning")
-page = st.sidebar.radio("Menu", ["Production Calculator", "BOM Manager", "Product Catalogue"])
-st.sidebar.divider()
-st.sidebar.caption("Simple flow")
-st.sidebar.write("Select product → enter quantity → enter stock → download order sheet")
-
-st.markdown("""
-<div class="hero">
-    <div class="brand-row">
-        <div>
-            <div class="brand">ECL India • Internal Factory Tool</div>
-            <div class="hero-title">Material Requirement Planner</div>
-            <div class="hero-subtitle">
-                Calculate required material, compare available stock, and prepare a purchase order sheet for production.
-            </div>
+st.markdown(
+    """
+    <div class="ecl-header">
+        <div class="ecl-kicker">ECL India • Internal Factory Tool</div>
+        <div class="ecl-title">Material Requirement Planner</div>
+        <div class="ecl-subtitle">
+            Calculate production material requirements, compare stock in hand, and prepare purchase order sheets.
         </div>
-        <div class="ecl-pill">BOM Calculator</div>
     </div>
-</div>
-""", unsafe_allow_html=True)
+    """,
+    unsafe_allow_html=True,
+)
 
-if page == "Production Calculator":
-    st.markdown('<div class="panel">', unsafe_allow_html=True)
-    st.markdown('<div class="panel-title">Production setup</div>', unsafe_allow_html=True)
-    st.markdown('<div class="panel-help">Select the product and production quantity. Stock entry is optional; blank stock is treated as zero.</div>', unsafe_allow_html=True)
+calculator_tab, manager_tab, catalogue_tab = st.tabs(["Production Calculator", "BOM Manager", "Product Catalogue"])
 
-    col1, col2, col3, col4 = st.columns([1.7, 1, 1, 0.8])
-    with col1:
-        selected_product = st.selectbox("Product / Model", list(st.session_state.products.keys()))
-    with col2:
+# -----------------------------------------------------------------------------
+# Production Calculator
+# -----------------------------------------------------------------------------
+
+with calculator_tab:
+    st.markdown('<div class="ecl-panel">', unsafe_allow_html=True)
+    st.subheader("Production setup")
+    st.markdown('<div class="ecl-help">Select product, enter quantity, and optionally add material wastage.</div>', unsafe_allow_html=True)
+
+    product_names = list(st.session_state.products.keys())
+    c1, c2, c3, c4 = st.columns([1.7, 1, 1, 0.8])
+
+    with c1:
+        product_name = st.selectbox("Product / Model", product_names)
+    with c2:
         quantity = st.number_input("Production Quantity", min_value=0, value=1000, step=1)
-    with col3:
+    with c3:
         wastage = st.number_input("Wastage %", min_value=0.0, value=0.0, step=0.5)
-    with col4:
-        product = st.session_state.products[selected_product]
+    with c4:
+        selected_product = st.session_state.products[product_name]
         st.write("BOM Status")
-        badge = '<span class="ready-badge">READY</span>' if product["components"] else '<span class="pending-badge">PENDING</span>'
-        st.markdown(badge, unsafe_allow_html=True)
+        badge_class = "status-ready" if selected_product["components"] else "status-pending"
+        badge_text = "READY" if selected_product["components"] else "PENDING"
+        st.markdown(f'<span class="{badge_class}">{badge_text}</span>', unsafe_allow_html=True)
 
-    st.markdown(f'<div class="small-note">{product.get("category", "")} • {product.get("description", "")}</div>', unsafe_allow_html=True)
-    st.markdown("</div>", unsafe_allow_html=True)
+    st.caption(f"{selected_product.get('category', '')} • {selected_product.get('description', '')}")
+    st.markdown('</div>', unsafe_allow_html=True)
 
-    if not product["components"]:
-        st.warning("This ECL catalogue item is saved as a placeholder. Add its internal BOM in BOM Manager before calculation.")
-        st.stop()
+    if not selected_product["components"]:
+        st.info("This catalogue item is saved as a placeholder. Add its internal BOM in BOM Manager before calculating material.")
+    else:
+        df = product_dataframe(product_name)
 
-    df = get_product_df(selected_product)
+        st.markdown('<div class="ecl-panel">', unsafe_allow_html=True)
+        st.subheader("Stock entry")
+        st.markdown('<div class="ecl-help">Only edit the Stock In Hand column. Leave stock as 0 when current stock is unknown.</div>', unsafe_allow_html=True)
+        st.markdown(
+            '<div class="unit-note"><b>Unit rule:</b> Enter stock in the unit shown. For wire in mm, enter millimetres. Example: 500 metres = 500000 mm.</div>',
+            unsafe_allow_html=True,
+        )
 
-    st.markdown('<div class="panel">', unsafe_allow_html=True)
-    st.markdown('<div class="panel-title">Stock entry</div>', unsafe_allow_html=True)
-    st.markdown('<div class="panel-help">Only the Stock In Hand column is editable. BOM quantities are locked to avoid mistakes.</div>', unsafe_allow_html=True)
-    st.markdown('<div class="notice"><b>Unit rule:</b> Enter stock in the same unit shown. For wire in mm, enter millimetres. Example: 500 metres = 500000 mm.</div>', unsafe_allow_html=True)
+        edited_df = st.data_editor(
+            df,
+            hide_index=True,
+            use_container_width=True,
+            num_rows="fixed",
+            disabled=["Component Name", "Specification", "Unit", "Required Per Unit"],
+            column_config={
+                "Component Name": st.column_config.TextColumn("Material Name", width="medium"),
+                "Specification": st.column_config.TextColumn("Specification", width="large"),
+                "Unit": st.column_config.TextColumn("Unit", width="small"),
+                "Required Per Unit": st.column_config.NumberColumn("Required / Unit", format="%.2f", width="small"),
+                "Stock In Hand": st.column_config.NumberColumn("Stock In Hand", min_value=0.0, step=1.0, format="%.2f", width="small"),
+            },
+            key=f"stock_editor_{product_name}",
+        )
+        save_stock(edited_df)
+        st.markdown('</div>', unsafe_allow_html=True)
 
-    edited = st.data_editor(
-        df,
-        hide_index=True,
-        use_container_width=True,
-        num_rows="fixed",
-        disabled=["Component Name", "Specification", "Unit", "Required Per Unit"],
-        column_config={
-            "Component Name": st.column_config.TextColumn("Material Name", width="medium"),
-            "Specification": st.column_config.TextColumn("Specification", width="large"),
-            "Unit": st.column_config.TextColumn("Unit", width="small"),
-            "Required Per Unit": st.column_config.NumberColumn("Required / Unit", format="%.2f"),
-            "Stock In Hand": st.column_config.NumberColumn("Stock In Hand", min_value=0, step=1, format="%.2f"),
-        },
-        key=f"stock_editor_{selected_product}",
-    )
-    save_stock_from_df(edited)
-    st.markdown("</div>", unsafe_allow_html=True)
+        result = calculate_requirements(edited_df, quantity, wastage)
 
-    result = calculate(edited, quantity, wastage)
+        enough = int((result["Status"] == "Enough Stock").sum())
+        need_order = int((result["Status"] == "Order Required").sum())
+        pieces_to_order = result[result["Unit"].eq("pcs")]["Quantity To Order"].sum()
+        wire_to_order_mm = result[result["Unit"].eq("mm")]["Quantity To Order"].sum()
 
-    enough = int((result["Status"] == "Enough Stock").sum())
-    shortage = int((result["Status"] == "Order Required").sum())
-    pieces_to_order = result[result["Unit"] == "pcs"]["Quantity To Order"].sum()
-    wire_to_order = result[result["Unit"] == "mm"]["Quantity To Order"].sum()
+        s1, s2, s3, s4, s5 = st.columns(5)
+        s1.metric("BOM Lines", len(result))
+        s2.metric("Enough Stock", enough)
+        s3.metric("Need Order", need_order)
+        s4.metric("Pieces To Order", f"{pieces_to_order:,.0f}")
+        s5.metric("Wire To Order", f"{wire_to_order_mm / 1000:,.2f} m")
 
-    s1, s2, s3, s4, s5 = st.columns(5)
-    s1.metric("BOM Lines", len(result))
-    s2.metric("Enough Stock", enough)
-    s3.metric("Need Order", shortage)
-    s4.metric("Pieces To Order", f"{pieces_to_order:,.0f}")
-    s5.metric("Wire To Order", f"{wire_to_order / 1000:,.2f} m")
+        st.markdown('<div class="ecl-panel">', unsafe_allow_html=True)
+        st.subheader("Final order sheet")
+        st.markdown('<div class="ecl-help">Download this table for purchase planning or stores verification.</div>', unsafe_allow_html=True)
 
-    st.markdown('<div class="panel">', unsafe_allow_html=True)
-    st.markdown('<div class="panel-title">Final order sheet</div>', unsafe_allow_html=True)
-    st.markdown('<div class="panel-help">Use this table for purchase planning or stores verification.</div>', unsafe_allow_html=True)
+        final_table = display_table(result)
 
-    final_table = format_table(result)
+        def colour_status(row):
+            styles = [""] * len(row)
+            status_idx = row.index.get_loc("Status")
+            order_idx = row.index.get_loc("Quantity To Order")
+            if row["Status"] == "Order Required":
+                styles[status_idx] = "background-color: #fff3e2; color: #9a3412; font-weight: 700;"
+                styles[order_idx] = "color: #9a3412; font-weight: 700;"
+            else:
+                styles[status_idx] = "background-color: #e9f7ef; color: #166534; font-weight: 700;"
+            return styles
 
-    def style_status(row):
-        styles = [""] * len(row)
-        if row["Status"] == "Order Required":
-            styles[row.index.get_loc("Status")] = "background-color:#fff4e6;color:#9a3412;font-weight:800;"
-            styles[row.index.get_loc("Quantity To Order")] = "color:#9a3412;font-weight:800;"
-        else:
-            styles[row.index.get_loc("Status")] = "background-color:#eaf7ee;color:#166534;font-weight:800;"
-        return styles
+        st.dataframe(final_table.style.apply(colour_status, axis=1), use_container_width=True, hide_index=True)
 
-    st.dataframe(final_table.style.apply(style_status, axis=1), use_container_width=True, hide_index=True)
+        st.download_button(
+            "Download Order Sheet CSV",
+            data=export_csv(result, product_name, quantity),
+            file_name=f"{product_name.replace(' ', '_').replace('/', '-')}_order_sheet.csv",
+            mime="text/csv",
+            use_container_width=True,
+        )
+        st.markdown('</div>', unsafe_allow_html=True)
 
-    st.download_button(
-        "Download Order Sheet CSV",
-        data=build_csv(result, selected_product, quantity),
-        file_name=f"{selected_product.replace(' ', '_').replace('/', '-')}_order_sheet.csv",
-        mime="text/csv",
-        use_container_width=True
-    )
-    st.markdown("</div>", unsafe_allow_html=True)
+# -----------------------------------------------------------------------------
+# BOM Manager
+# -----------------------------------------------------------------------------
 
-elif page == "BOM Manager":
-    st.markdown('<div class="panel">', unsafe_allow_html=True)
-    st.markdown('<div class="panel-title">BOM Manager</div>', unsafe_allow_html=True)
-    st.markdown('<div class="panel-help">Add or edit material requirements for future ECL products. Keep this section for office/admin use.</div>', unsafe_allow_html=True)
+with manager_tab:
+    st.markdown('<div class="ecl-panel">', unsafe_allow_html=True)
+    st.subheader("BOM Manager")
+    st.markdown('<div class="ecl-help">Use this section to add or edit BOMs for future ECL products.</div>', unsafe_allow_html=True)
 
-    selected = st.selectbox("Product to edit", list(st.session_state.products.keys()))
+    selected = st.selectbox("Product to edit", list(st.session_state.products.keys()), key="manager_product")
     product = st.session_state.products[selected]
 
-    c1, c2 = st.columns([1, 2])
-    with c1:
+    m1, m2 = st.columns([1, 2])
+    with m1:
         product["category"] = st.text_input("Category", value=product.get("category", "Uncategorised"))
-    with c2:
+    with m2:
         product["description"] = st.text_input("Description", value=product.get("description", ""))
 
-    st.subheader("Current BOM")
+    st.markdown("#### Current BOM")
     if product["components"]:
         bom_df = pd.DataFrame(product["components"])
         edited_bom = st.data_editor(
@@ -476,60 +436,57 @@ elif page == "BOM Manager":
             num_rows="dynamic",
             column_config={
                 "Unit": st.column_config.SelectboxColumn("Unit", options=ALLOWED_UNITS),
-                "Required Per Unit": st.column_config.NumberColumn("Required Per Unit", min_value=0, step=1),
+                "Required Per Unit": st.column_config.NumberColumn("Required Per Unit", min_value=0.0, step=1.0),
             },
-            key=f"bom_{selected}"
+            key=f"bom_editor_{selected}",
         )
         product["components"] = edited_bom.to_dict("records")
     else:
-        st.info("No BOM added yet for this product.")
+        st.info("No BOM added for this product yet.")
 
-    st.subheader("Add component")
-    a1, a2, a3, a4 = st.columns([1.3, 2, 0.7, 1])
+    st.markdown("#### Add component")
+    a1, a2, a3, a4 = st.columns([1.2, 2, 0.8, 1])
     with a1:
-        name = st.text_input("Component Name")
+        component_name = st.text_input("Component Name")
     with a2:
-        spec = st.text_input("Specification")
+        specification = st.text_input("Specification")
     with a3:
         unit = st.selectbox("Unit", ALLOWED_UNITS)
     with a4:
-        req = st.number_input("Required / Unit", min_value=0.0, value=1.0, step=1.0)
+        required_per_unit = st.number_input("Required / Unit", min_value=0.0, value=1.0, step=1.0)
 
     if st.button("Add Component", use_container_width=True):
-        if not name.strip():
+        if not component_name.strip():
             st.error("Component name is required.")
         else:
-            product["components"].append({
-                "Component Name": name.strip(),
-                "Specification": spec.strip(),
-                "Unit": unit,
-                "Required Per Unit": float(req),
-            })
-            st.success("Component added.")
-    st.markdown("</div>", unsafe_allow_html=True)
+            product["components"].append(
+                {
+                    "Component Name": component_name.strip(),
+                    "Specification": specification.strip(),
+                    "Unit": unit,
+                    "Required Per Unit": float(required_per_unit),
+                }
+            )
+            st.success("Component added. It will appear after the next refresh/rerun.")
 
-elif page == "Product Catalogue":
-    st.markdown('<div class="panel">', unsafe_allow_html=True)
-    st.markdown('<div class="panel-title">ECL Product Catalogue</div>', unsafe_allow_html=True)
-    st.markdown('<div class="panel-help">Products with BOM READY can be calculated. BOM PENDING products need internal material data first.</div>', unsafe_allow_html=True)
+    st.markdown('</div>', unsafe_allow_html=True)
 
-    rows = []
-    for name, data in st.session_state.products.items():
-        rows.append({
-            "Product / Model": name,
-            "Category": data.get("category", "Uncategorised"),
-            "BOM Status": "BOM READY" if data.get("components") else "BOM PENDING",
-            "Material Lines": len(data.get("components", [])),
-            "Description": data.get("description", ""),
-        })
-    catalogue = pd.DataFrame(rows).sort_values(["Category", "Product / Model"])
+# -----------------------------------------------------------------------------
+# Product Catalogue
+# -----------------------------------------------------------------------------
 
+with catalogue_tab:
+    st.markdown('<div class="ecl-panel">', unsafe_allow_html=True)
+    st.subheader("ECL Product Catalogue")
+    st.markdown('<div class="ecl-help">Products marked Ready can be calculated. Pending products need their internal BOM added first.</div>', unsafe_allow_html=True)
+
+    catalogue = product_catalogue_df()
     c1, c2, c3 = st.columns(3)
     c1.metric("Total Products", len(catalogue))
-    c2.metric("BOM Ready", int((catalogue["BOM Status"] == "BOM READY").sum()))
-    c3.metric("BOM Pending", int((catalogue["BOM Status"] == "BOM PENDING").sum()))
+    c2.metric("BOM Ready", int((catalogue["BOM Status"] == "Ready").sum()))
+    c3.metric("BOM Pending", int((catalogue["BOM Status"] == "Pending").sum()))
 
     st.dataframe(catalogue, use_container_width=True, hide_index=True)
-    st.markdown("</div>", unsafe_allow_html=True)
+    st.markdown('</div>', unsafe_allow_html=True)
 
-st.markdown('<div class="footer">ECL India internal material planning tool</div>', unsafe_allow_html=True)
+st.caption("ECL India internal material planning tool")
