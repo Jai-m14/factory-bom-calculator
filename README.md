@@ -1,48 +1,26 @@
-# ECL Material Calculator
+# ECL Material Requirement Planner
 
-A simple internal factory material calculator for ECL India / ECL Magtronics.
+Three-page Streamlit app for factory material planning.
 
-## What it does
+## Pages
 
-Select a product (SHINE NEW or SHINE OLD), enter how many pieces you want to make, optionally enter current stock, and the app calculates exactly what needs to be ordered.
+1. Required Components
+2. Stock Entry
+3. Final Summary
+4. Product List
 
-## Products supported
+## Deployment
 
-- **SHINE NEW** — New Shine stator wire harness
-- **SHINE OLD** — Old Shine stator wire harness
+Upload to GitHub and deploy on Streamlit Community Cloud.
 
-## How to run locally
+Main file path:
 
-```bash
-pip install streamlit pandas
-streamlit run app.py
-```
+app.py
 
-## Deploy on Streamlit Community Cloud
+## Required files
 
-1. Push this folder to a GitHub repository.
-2. Go to [share.streamlit.io](https://share.streamlit.io).
-3. Connect your GitHub repo.
-4. Set the main file path to `app.py`.
-5. Click Deploy.
-
-## Unit reminder for users
-
-- For **parts/components**: enter quantities in **pieces (pcs)**.
-- For **wire**: enter lengths in **millimetres (mm)**. Example: 500 metres = 500,000 mm.
-
-## File structure
-
-```
-ecl_calculator/
-├── app.py
-├── requirements.txt
-├── runtime.txt
-├── README.md
-└── .streamlit/
-    └── config.toml
-```
-
-## Adding more products
-
-Open `app.py` and add a new entry to the `PRODUCTS` dictionary following the same format as SHINE NEW or SHINE OLD. No other changes needed.
+- app.py
+- requirements.txt
+- runtime.txt
+- README.md
+- .streamlit/config.toml
